@@ -171,3 +171,9 @@ cython_debug/
 .pypirc
 
 .intermodal\results\old
+.NYC20/L2
+.NYC20/L4
+.NYC20/L3
+.NYC250/L2
+.NYC250/L4
+.NYC250/L3
