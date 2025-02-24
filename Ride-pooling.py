@@ -31,7 +31,8 @@ mat_digraph = io.loadmat(CITY_FOLDER+'/digraph_data.mat', squeeze_me=True)
 DemandS = mat_graphs['DemandS']             #store demand
 FreeFlowTime = mat_graphs['FreeFlowTime']   #store freeflowtime
 NodesLoc = mat_graphs['NodesLoc']           #store nodesLoc
-
+print(DemandS)
+dfs
 # Generating the diagraph
 adjMatrix = mat_digraph.get('adj_matrix')
 edgeList = mat_digraph.get('edge_list')
