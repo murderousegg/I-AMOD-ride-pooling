@@ -103,23 +103,6 @@ def add_demand_cnstr(m, tnet, x, bush=False):
         [m.addConstr(quicksum(m.getVarByName('x^' + str(s) + '_' + str(i) + '_' + str(j)) for i, l in tnet.G_supergraph.in_edges(nbunch=j)) \
                         == quicksum(m.getVarByName('x^' + str(s) + '_' + str(j) + '_' + str(k)) for l, k in tnet.G_supergraph.out_edges(nbunch=j))) \
                         for s in tnet.O for j in [j for j in tnet.G_supergraph.nodes() if j not in set(D[s]) if j != s]]
-        '''
-        for s in tnet.O:
-            dsum = sum([v for k,v in tnet.g.items() if k[0]==s])
-            D = [d for o, d in tnet.g.keys() if o == s]
-
-            for j in tnet.G_supergraph.nodes():    
-                if j in D:
-                    d1 = tnet.g[(s,j)]
-                    m.addConstr(quicksum(m.getVarByName('x^' + str(s) + '_' + str(i) + '_' + str(j)) for i, l in tnet.G_supergraph.in_edges(nbunch=j)) - d1 \
-                        == quicksum(m.getVarByName('x^' + str(s) + '_' + str(j) + '_' + str(k)) for l, k in tnet.G_supergraph.out_edges(nbunch=j)))
-                elif j == s:
-                    m.addConstr(quicksum(m.getVarByName('x^' + str(s) + '_' + str(i) + '_' + str(j)) for i, l in tnet.G_supergraph.in_edges(nbunch=j)) \
-                        == quicksum(m.getVarByName('x^' + str(s) + '_' + str(j) + '_' + str(k)) for l, k in tnet.G_supergraph.out_edges(nbunch=j)) - dsum)
-                else:
-                    m.addConstr(quicksum(m.getVarByName('x^' + str(s) + '_' + str(i) + '_' + str(j)) for i, l in tnet.G_supergraph.in_edges(nbunch=j)) \
-                                == quicksum(m.getVarByName('x^' + str(s) + '_' + str(j) + '_' + str(k)) for l, k in tnet.G_supergraph.out_edges(nbunch=j)) )
-        '''
     m.update()
 
 @timeit
@@ -207,23 +190,6 @@ def set_exogenous_flow(tnet, exogenous_G):
             exo_G[i][j]['flow'] = exogenous_G[i][j]['flow']
     return  exo_G
 
-
-
-'''
-    for i,j in tnet.G_supergraph.edges():
-        obj += Vt *tnet.G_supergraph[i][j]['t_0'] * quicksum(m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j)) for w in tnet.g.keys()) \
-            + Vt * (tnet.G_supergraph[i][j]['t_0'] * beta[0]/tnet.G_supergraph[i][j]['capacity']) * m.getVarByName('e^1_'+str(i)+'_'+str(j)) \
-                * (m.getVarByName('e^1_'+str(i)+'_'+str(j)) + theta[0]*tnet.G_supergraph[i][j]['capacity'] - exogenous_G[i][j]['flow']) \
-            + Vt * (tnet.G_supergraph[i][j]['t_0'] * beta[1]/tnet.G_supergraph[i][j]['capacity']) * m.getVarByName('e^2_'+str(i)+'_'+str(j)) \
-                * (m.getVarByName('e^2_'+str(i)+'_'+str(j)) + theta[1]*tnet.G_supergraph[i][j]['capacity'] - exogenous_G[i][j]['flow']) \
-            + Vt * (tnet.G_supergraph[i][j]['t_0'] * beta[0]/tnet.G_supergraph[i][j]['capacity'] * m.getVarByName('e^2_'+str(i)+'_'+str(j)) \
-                * (theta[1]*tnet.G_supergraph[i][j]['capacity'] - theta[0]*tnet.G_supergraph[i][j]['capacity']) )
-
-    for i,j in tnet.G.edges():
-        obj +=  (Vd * tnet.G_supergraph[i][j]['t_0'] + Ve * tnet.G_supergraph[i][j]['e']) * ( \
-                #sum(m.getVarByName('x^' + str(w) + '_' + str(i) + '_' + str(j)) for w in tnet.g.keys()) +\
-                m.getVarByName('x^R' + str(i) + '_' + str(j)))
-'''
 @timeit
 def get_obj_CARSn(m, tnet, xu,  theta, a, exogenous_G, linear=False):#, userCentric=False):
     #TODO: this could be written more efficiently, include user-centric approach
@@ -242,16 +208,6 @@ def get_obj_CARSn(m, tnet, xu,  theta, a, exogenous_G, linear=False):#, userCent
                 ) for l in range(len(theta)-1))  \
                 + (Vd * tnet.G_supergraph[i][j]['t_0'] + Ve * tnet.G_supergraph[i][j]['e']) * m.getVarByName('x^R' + str(i) + '_' + str(j))\
                 for i,j in tnet.G.edges())
-        '''
-        obj = quicksum( Vt * tnet.G_supergraph[i][j]['t_0'] * xu[(i, j)] \
-                + quicksum( Vt * tnet.G_supergraph[i][j]['t_0'] * a[l]/tnet.G_supergraph[i][j]['capacity'] *  m.getVarByName('e^'+str(l)+'_'+str(i)+'_'+str(j)) * (quicksum(((theta[k + 1] - theta[k]) * tnet.G_supergraph[i][j]['capacity']) for k in range(l))) \
-                + Vt * tnet.G_supergraph[i][j]['t_0'] * a[l]/tnet.G_supergraph[i][j]['capacity'] * m.getVarByName('e^'+str(l)+'_'+str(i)+'_'+str(j)) * ((theta[l+1]-theta[l])*tnet.G_supergraph[i][j]['capacity']) \
-                + Vt * tnet.G_supergraph[i][j]['t_0'] * a[l]/tnet.G_supergraph[i][j]['capacity'] *(theta[l+1] - theta[l])*tnet.G_supergraph[i][j]['capacity']*(quicksum(m.getVarByName('e^'+str(k)+'_'+str(i)+'_'+str(j)) for k in range(l+1, len(theta)-1))) \
-                - Vt * tnet.G_supergraph[i][j]['t_0'] * a[l]/tnet.G_supergraph[i][j]['capacity'] * m.getVarByName('e^'+str(l)+'_'+str(i)+'_'+str(j)) * exogenous_G[i][j]['flow'] \
-                for l in range(len(theta)-1))  \
-                + (Vd * tnet.G_supergraph[i][j]['t_0'] + Ve * tnet.G_supergraph[i][j]['e']) * m.getVarByName('x^R' + str(i) + '_' + str(j)) \
-                for i,j in tnet.G_supergraph.edges())
-        '''
     else:
         obj = quicksum(Vt * tnet.G_supergraph[i][j]['t_0'] * xu[(i, j)] for i,j in tnet.G_supergraph.edges())
         obj = obj+ quicksum(\
@@ -263,62 +219,7 @@ def get_obj_CARSn(m, tnet, xu,  theta, a, exogenous_G, linear=False):#, userCent
                 + (Vd * tnet.G_supergraph[i][j]['t_0'] + Ve * tnet.G_supergraph[i][j]['e']) * m.getVarByName('x^R' + str(i) + '_' + str(j))\
                 for i,j in tnet.G.edges())
 
-
-        '''
-        if linear == True:
-            Vt, Vd, Ve = set_CARS_par(tnet)
-            obj = quicksum( Vt * tnet.G_supergraph[i][j]['t_0'] * xu[(i, j)] \
-                    + quicksum( Vt * tnet.G_supergraph[i][j]['t_0'] * a[l]/tnet.G_supergraph[i][j]['capacity'] *  m.getVarByName('e^'+str(l)+'_'+str(i)+'_'+str(j)) * (quicksum(((theta[k + 1] - theta[k]) * tnet.G_supergraph[i][j]['capacity']) for k in range(l))) \
-                    + Vt * tnet.G_supergraph[i][j]['t_0'] * a[l]/tnet.G_supergraph[i][j]['capacity'] * m.getVarByName('e^'+str(l)+'_'+str(i)+'_'+str(j)) * ( m.getVarByName('e^'+str(l)+'_'+str(i)+'_'+str(j))) \
-                    + Vt * tnet.G_supergraph[i][j]['t_0'] * a[l]/tnet.G_supergraph[i][j]['capacity'] *(theta[l+1] - theta[l])*tnet.G_supergraph[i][j]['capacity']*(quicksum(m.getVarByName('e^'+str(k)+'_'+str(i)+'_'+str(j)) for k in range(l+1, len(theta)-1))) \
-                    - Vt * tnet.G_supergraph[i][j]['t_0'] * a[l]/tnet.G_supergraph[i][j]['capacity'] * m.getVarByName('e^'+str(l)+'_'+str(i)+'_'+str(j)) * exogenous_G[i][j]['flow'] \
-                    for l in range(len(theta)-1))  \
-                    + (Vd * tnet.G_supergraph[i][j]['t_0'] + Ve * tnet.G_supergraph[i][j]['e']) * m.getVarByName('x^R' + str(i) + '_' + str(j)) \
-                    for i,j in tnet.G_supergraph.edges())
-
-        else:
-            Vt, Vd, Ve = set_CARS_par(tnet)
-            obj = quicksum(Vt * tnet.G_supergraph[i][j]['t_0'] * xu[(i,j)] for i,j in tnet.G_supergraph.edges())
-            for i,j in tnet.G_supergraph.edges():
-                t0 = tnet.G_supergraph[i][j]['t_0']
-                mij = tnet.G_supergraph[i][j]['capacity']
-                ue = exogenous_G[i][j]['flow']
-                for l in range(len(theta)-1):
-                    Vtt_0al = Vt * t0 * a[l]/mij
-                    e_l = m.getVarByName('e^'+str(l)+'_'+str(i)+'_'+str(j))
-                    obj += Vtt_0al *  e_l * (quicksum(((theta[k + 1] - theta[k]) * mij) for k in range(l)))
-                    obj += Vtt_0al * e_l * ( e_l)
-                    obj += Vtt_0al *(theta[l+1] - theta[l])*mij*(quicksum(m.getVarByName('e^'+str(k)+'_'+str(i)+'_'+str(j)) for k in range(l+1, len(theta)-1)))
-                    obj -= Vtt_0al* e_l * ue
-        '''
-
-
-    '''   
-    else:
-        #if linear == True:
-        Vt, Vd, Ve = set_CARS_par(tnet)
-        obj = 0
-        obj = quicksum(Vt * tnet.G_supergraph[i][j]['t_0'] for i,j in tnet.G_supergraph.edges())
-        for i,j in tnet.G_supergraph.edges():
-            t0 = tnet.G_supergraph[i][j]['t_0']
-            mij = tnet.G_supergraph[i][j]['capacity']
-            ue = exogenous_G[i][j]['flow']
-            for l in range(len(theta)-1):
-                Vtt_0al = Vt * t0 * a[l] / mij
-                e_l = m.getVarByName('e^' + str(l) + '_' + str(i) + '_' + str(j))
-                obj += quicksum(Vtt_0al * e_l / ((theta[k + 1] - theta[k]) * mij - ue) for k in range(l))
-                obj += Vtt_0al * (1 - e_l / ue)                             #Vtt_0al * (e_l * e_l - e_l * ue)
-                obj += quicksum(Vtt_0al * ((theta[l + 1] - theta[l]) * mij / m.getVarByName(
-                    'e^' + str(k) + '_' + str(i) + '_' + str(j)) - e_l * ue) for k in range(l + 1, len(theta) - 1))
-    '''
-
-    #obj += quicksum((Vd * tnet.G_supergraph[i][j]['t_0'] + Ve * tnet.G_supergraph[i][j]['e']) * m.getVarByName('x^R' + str(i) + '_' + str(j)) for i,j in tnet.G_supergraph.edges())
     return obj
-
-
-
-
-
 
 @timeit
 def add_epsilon_cnstr(m, tnet, xu, n, theta, exogenous_G):
@@ -328,58 +229,7 @@ def add_epsilon_cnstr(m, tnet, xu, n, theta, exogenous_G):
                       + exogenous_G[i][j]['flow'] \
                       - theta[l]*tnet.G_supergraph[i][j]['capacity'] \
                       - quicksum(m.getVarByName('e^'+str(l+k+1)+'_'+str(i)+'_'+str(j)) for k in range(n-l-1))) for i,j in tnet.G.edges() for l in range(n) ]
-                      #- quicksum(m.getVarByName('e^' + str(l + k) + '_' + str(i) + '_' + str(j)) for k in range(n - l))) for i, j in tnet.G_supergraph.edges() for l in range(n)]
-    #[m.addConstr(m.getVarByName('e^'+str(l)+'_'+str(i)+'_'+str(j))\
-    #                  <= (theta[l+1]-theta[l])*tnet.G_supergraph[i][j]['capacity'] )for i,j in tnet.G_supergraph.edges() for l in range(n-1)]
-    # maximum flow
-    #[m.addConstr(m.getVarByName('e^' + str(l) + '_' + str(i) + '_' + str(j)) \
-    #             <= (theta[l + 1] - theta[l]) * tnet.G_supergraph[i][j]['capacity']) for i, j in
-    # tnet.G_supergraph.edges() for l in range(n - 1)]
 
-'''
-@timeit
-def solve_CARSn(tnet, fcoeffs, n=3, exogenous_G=False, rebalancing=True, linear=False, method=-1, theta=False, a=False):
-    if (theta==False) or (a==False):
-        systemOptimal = True
-        if systemOptimal:
-            fcoeffs = SO_fcoeffs(fcoeffs)
-            print(fcoeffs)
-        theta, a, rms  = get_approx_fun(fcoeffs=fcoeffs, nlines=n, range_=[0,3], plot=False)
-        theta.append(3)
-    exogenous_G = set_exogenous_flow(tnet, exogenous_G)
-    # Start model
-    m = Model('QP')
-    m.setParam('OutputFlag',0)
-    m.setParam('BarHomogeneous', 1)
-    m.setParam('Method', method)
-    m.update()
-    # Define variables
-    [m.addVar(lb=0, name='x^'+str(w)+'_'+str(i)+'_'+str(j)) for i,j in tnet.G_supergraph.edges() for w in tnet.g.keys()]
-    if rebalancing == True:
-        [m.addVar(lb=0, name='x^R'+str(i)+'_'+str(j)) for i,j in tnet.G_supergraph.edges()]
-    else:
-        [m.addVar(lb=0, ub=0, name='x^R' + str(i) + '_' + str(j)) for i, j in tnet.G_supergraph.edges()]
-
-    [m.addVar(lb=0, name='e^'+str(l)+'_'+str(i)+'_'+str(j)) for i,j in tnet.G_supergraph.edges() for l in range(n)]
-    m.update()
-    # Set Obj
-    obj = get_obj_CARSn(m, tnet, theta, a, exogenous_G, linear=linear)
-    # Set Constraints
-    add_demand_cnstr(m, tnet)
-    if rebalancing==True:
-        add_rebalancing_cnstr(m,tnet)
-    add_epsilon_cnstr(m, tnet, n, theta, exogenous_G)
-    m.update()
-    # Solve problem
-    m.setObjective(obj, GRB.MINIMIZE)
-    m.update()
-    m.optimize()
-    # saving  results
-    set_optimal_flows(m, tnet)
-    tnet.cars_obj = obj.getValue()
-    od_flows = get_OD_result_flows(m, tnet)
-    return tnet, m.Runtime, od_flows
-'''
 
 def add_bike_cnstr(m, tnet, xu):
     [m.addConstr(
@@ -387,14 +237,15 @@ def add_bike_cnstr(m, tnet, xu):
     		for j in tnet.G_supergraph.nodes() if 'b' in str(j)]         
     m.update()
 
-
-@timeit
-def solve_cars_matrix(tnet, fcoeffs, n=3, exogenous_G=False, rebalancing=True, linear=False, LP_method=-1, QP_method=-1, theta=False, a=False, bush=False, theta_n=3, userCentric=False, od_flows_flag=True):
+def solve_multimodal(tnet, sol_costs, fcoeffs, n=3, exogenous_G=False, rebalancing=True, linear=False, LP_method=-1,\
+                       QP_method=-1, a=False, rp_list=[]):
+    
     ridepool = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'rp']
     pedestrian = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'p']
     connector = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'f']
-    connector_rp = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'f_rp']
+    connector_rp = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'fq']
     car = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 0]
+    full_rp = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == "q"]
 
     ridepool_nodes = [node for node in tnet.G_supergraph.nodes() if "rp" in str(node)]
     car_nodes = [node for node in tnet.G_supergraph.nodes() if isinstance(node,int)]
@@ -404,6 +255,392 @@ def solve_cars_matrix(tnet, fcoeffs, n=3, exogenous_G=False, rebalancing=True, l
 
     Binc = nx.incidence_matrix(tnet.G_supergraph, nodelist=node_order, edgelist=edge_order, oriented=True)
     [N_nodes,N_edges] = Binc.shape
+    B_kron = kron(np.eye(N_nodes), Binc, format='csr')
+
+    valid_pairs = set() # used to shape x
+    for i in range(B_kron.shape[0]):
+        row_start = B_kron.indptr[i]
+        row_end = B_kron.indptr[i + 1]
+        row_indices = B_kron.indices[row_start:row_end]
+
+        edge_indices = [j % N_edges for j in row_indices]
+        node_indices = [j // N_edges for j in row_indices]
+
+        valid_pairs.update(zip(edge_indices, node_indices))  # Store unique (edge, node) pairs
+    
+
+    Binc_car = nx.incidence_matrix(tnet.G, nodelist=tnet.G.nodes(), edgelist=tnet.G.edges(), oriented=True)
+    [N_car_nodes,N_car_edges] = Binc_car.shape
+    
+
+    node_index_map = {node: i for i, node in enumerate(tnet.G_supergraph.nodes())}
+    w_node_index_map = {}
+    count=0
+    for node in tnet.G_supergraph.nodes():
+        if "'" in str(node):
+            w_node_index_map[node] = count
+            count+=1
+    
+    demand_matrix = np.zeros((N_car_nodes, N_nodes))  # Square matrix
+    for (origin, destination), demand in tnet.g.items():
+        if origin in node_index_map and destination in node_index_map:
+            i = w_node_index_map[origin]
+            j = node_index_map[destination]
+            demand_matrix[i, j] = demand  # Assign demand from origin to destination
+    
+    for ii in range(N_nodes):
+        if "'" in str(node_order[ii]):
+            demand_matrix[w_node_index_map[node_order[ii]],ii] =\
+                -np.sum(demand_matrix[w_node_index_map[node_order[ii]],:]) - demand_matrix[w_node_index_map[node_order[ii]],ii]
+            
+    FFT = np.array([tnet.G_supergraph[u][v].get('t_0') for u, v in tnet.G_supergraph.edges()])
+
+    # Start model
+    m = Model('CARS')
+    m.setParam('OutputFlag',0 )
+    m.setParam('BarHomogeneous', 1)
+    #m.setParam("LogToConsole", 0)
+    #m.setParam("CSClientLog", 0)
+    if linear:
+        m.setParam('Method', LP_method)
+    else:
+        m.setParam('Method', QP_method)
+    m.update()
+
+    # x = m.addVars(N_edges, N_nodes, vtype=GRB.CONTINUOUS, lb=0, name="x")
+    # x = m.addVars(valid_pairs, vtype=GRB.CONTINUOUS, lb=0, name="x")
+    x = m.addVars(N_edges, N_car_nodes, vtype=GRB.CONTINUOUS, lb=0, name="x")
+    x_r = m.addVars(N_edges, vtype=GRB.CONTINUOUS, lb=0, name="x_r")
+    rp_full = m.addVars(len(rp_list), lb=0, vtype=GRB.CONTINUOUS, name="rp_full")
+    psi = m.addVars(3, lb=0, ub=1, vtype=GRB.CONTINUOUS, name="psi")
+    m.update()
+
+    m.setObjective(
+        quicksum(FFT[i] * x.sum(i,"*") for i in range(N_edges))
+        + quicksum(FFT[j] * x_r[j] for j in range(N_edges))
+        + quicksum(sol_costs[i] * rp_full[i] for i in range(len(rp_list))),
+        GRB.MINIMIZE)
+    m.update()
+
+    m.addConstr(psi.sum('*') == 1)
+    
+
+    # # Demand reshaped to 1D array
+    b = demand_matrix.flatten()
+
+    for i in range(b.shape[0]):
+        lhs = LinExpr()  # Initialize linear expression for constraint
+        row_start = B_kron.indptr[i]  # Start of row i in CSR format
+        row_end = B_kron.indptr[i + 1]  # End of row i
+        row_data = B_kron.data[row_start:row_end]  # Non-zero values in row i
+        row_indices = B_kron.indices[row_start:row_end]  # Column indices of non-zero values
+
+        edge_indices = [j % N_edges for j in row_indices]  # Extract corresponding edge index
+        node_indices = [j // N_edges for j in row_indices]  # Extract node index
+        
+        lhs.addTerms(row_data, [x[edge_indices[idx], node_indices[idx]] for idx in range(len(row_indices))])
+        # Add constraint for row i
+        m.addConstr(lhs == b[i], name=f"DemandBalance_{i}")
+
+    rp_flow = {}
+    rp_full_flow = {}
+    car_flow = {}
+    A_q_up_flow = {}
+    A_q_down_flow = {}
+
+    for i, edge in enumerate(edge_order):
+        if edge in ridepool:
+            rp_flow[edge] = x.sum(i,'*')
+        elif edge in full_rp:
+            rp_full_flow[i] = x.sum(i,'*')
+        elif edge in car:
+            car_flow[edge] = x.sum(i,'*')
+        elif edge in connector_rp:
+            if "q" in edge[1]:
+                A_q_up_flow[edge] = x.sum(i,"*")
+            elif "q" in edge[0]:
+                A_q_down_flow[edge] = x.sum(i,"*")
+
+    for count,(i,var) in enumerate(rp_full_flow.items()):
+        m.addConstr(var == quicksum(rp_full[k] for k in range(len(rp_list)) if i in rp_list[k]))
+    
+    m.addConstrs((x[i,j] >= 0 for i in range(N_edges) for j in range(N_nodes) if (i,j) in x), name="NonNegativeX")
+    m.addConstrs((x_r[j] >= 0 for j in range(N_edges)), name="NonNegativeXR")
+    
+    ## NOTE: t_0 is relatively high ([60-120]), so there are relatively many vehicles per time unit on the road
+    # maybe t_0 should be scaled?    
+    vehicle_lim = 9000
+    m.addConstr(quicksum(tnet.G_supergraph[edge[0]][edge[1]]['t_0']
+                         *(x.sum(j,'*') + x_r[j]) 
+                         for j,edge in enumerate(edge_order) 
+                         if (isinstance(edge[0],int) and isinstance(edge[1],int)))
+                         + quicksum(sol_costs[i] * rp_full[i] for i in range(len(rp_list)))
+                              <= vehicle_lim)
+
+    #### bad vehicle limit
+    # m.addConstr(quicksum(x.sum(i,"*") + x_r[i] for i,edge in enumerate(edge_order) if edge in As_c_u_flow.keys())
+    #             + quicksum(x.sum(i,'*')/2 for i,edge in enumerate(edge_order) if edge in As_rp_u_flow) <= vehicle_lim)
+
+    # Reshape x variables for incidence matrix constraint
+    m.addConstrs(
+        (quicksum(Binc[i, j] * (x.sum(j,'*') + x_r[j])
+         for j,edge in enumerate(edge_order) if isinstance(edge[0],int) and isinstance(edge[1],int))
+         == 0 for i in range(N_nodes)),
+        name="Incidence")
+    
+    m.update()
+    m.optimize()
+    # Extract solution
+    x_mat = np.zeros((N_edges, N_nodes))
+    for i in range(N_edges):
+        for j in range(N_nodes):
+            if (i,j) in x:
+                x_mat[i,j] = x[i,j].X
+
+    x_r_mat = np.zeros((N_edges))
+    for i in range(N_edges):
+        x_r_mat[i] = x_r[i].X
+    
+    selected_tours = [rp_list[i] for i in range(len(rp_list)) if rp_full[i].X!=0]
+    arc_flows = x_mat.sum(axis=1) + x_r_mat
+    for i in range(N_edges):
+        tnet.G_supergraph[edge_order[i][0]][edge_order[i][1]]['flow'] = arc_flows[i]
+    print(m)
+    print(len(rp_list))
+    return selected_tours
+
+
+
+@timeit
+def solve_cars_matrix_rp_reduced(tnet, sol_costs, fcoeffs, n=3, exogenous_G=False, rebalancing=True, linear=False, LP_method=-1,\
+                       QP_method=-1, a=False, rp_list=[]):
+    
+    ridepool = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'rp']
+    pedestrian = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'p']
+    connector = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'f']
+    connector_rp = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'fq']
+    car = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 0]
+    full_rp = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == "q"]
+
+    ridepool_nodes = [node for node in tnet.G_supergraph.nodes() if "rp" in str(node)]
+    car_nodes = [node for node in tnet.G_supergraph.nodes() if isinstance(node,int)]
+    
+    node_order = list(tnet.G_supergraph.nodes())
+    edge_order = list(tnet.G_supergraph.edges())
+
+    Binc = nx.incidence_matrix(tnet.G_supergraph, nodelist=node_order, edgelist=edge_order, oriented=True)
+    [N_nodes,N_edges] = Binc.shape
+    B_kron = kron(np.eye(N_nodes), Binc, format='csr')
+
+    valid_pairs = set() # used to shape x
+    for i in range(B_kron.shape[0]):
+        row_start = B_kron.indptr[i]
+        row_end = B_kron.indptr[i + 1]
+        row_indices = B_kron.indices[row_start:row_end]
+
+        edge_indices = [j % N_edges for j in row_indices]
+        node_indices = [j // N_edges for j in row_indices]
+
+        valid_pairs.update(zip(edge_indices, node_indices))  # Store unique (edge, node) pairs
+    
+
+    Binc_car = nx.incidence_matrix(tnet.G, nodelist=tnet.G.nodes(), edgelist=tnet.G.edges(), oriented=True)
+    [N_car_nodes,N_car_edges] = Binc_car.shape
+    
+
+    node_index_map = {node: i for i, node in enumerate(tnet.G_supergraph.nodes())}
+    w_node_index_map = {}
+    count=0
+    for node in tnet.G_supergraph.nodes():
+        if "'" in str(node):
+            w_node_index_map[node] = count
+            count+=1
+    
+    demand_matrix = np.zeros((N_car_nodes, N_nodes))  # Square matrix
+    for (origin, destination), demand in tnet.g.items():
+        if origin in node_index_map and destination in node_index_map:
+            i = w_node_index_map[origin]
+            j = node_index_map[destination]
+            demand_matrix[i, j] = demand  # Assign demand from origin to destination
+    
+    for ii in range(N_nodes):
+        if "'" in str(node_order[ii]):
+            demand_matrix[w_node_index_map[node_order[ii]],ii] =\
+                -np.sum(demand_matrix[w_node_index_map[node_order[ii]],:]) - demand_matrix[w_node_index_map[node_order[ii]],ii]
+            
+    FFT = np.array([tnet.G_supergraph[u][v].get('t_0') for u, v in tnet.G_supergraph.edges()])
+
+    # Start model
+    m = Model('CARS')
+    m.setParam('OutputFlag',0 )
+    m.setParam('BarHomogeneous', 1)
+    #m.setParam("LogToConsole", 0)
+    #m.setParam("CSClientLog", 0)
+    if linear:
+        m.setParam('Method', LP_method)
+    else:
+        m.setParam('Method', QP_method)
+    m.update()
+    x = m.addVars(N_edges, N_car_nodes, vtype=GRB.CONTINUOUS, lb=0, name="x")
+    x_r = m.addVars(N_edges, vtype=GRB.CONTINUOUS, lb=0, name="x_r")
+    rp_full = m.addVars(len(rp_list), lb=0, vtype=GRB.CONTINUOUS, name="rp_full")
+    m.update()
+
+    m.setObjective(
+        quicksum(FFT[i] * x.sum(i,"*") for i in range(N_edges))
+        + quicksum(FFT[j] * x_r[j] for j in range(N_edges))
+        + quicksum(sol_costs[i] * rp_full[i] for i in range(len(rp_list))),
+        GRB.MINIMIZE)
+    m.update()
+
+    # # Demand reshaped to 1D array
+    b = demand_matrix.flatten()
+
+    for i in range(b.shape[0]):
+        lhs = LinExpr()  # Initialize linear expression for constraint
+        row_start = B_kron.indptr[i]  # Start of row i in CSR format
+        row_end = B_kron.indptr[i + 1]  # End of row i
+        row_data = B_kron.data[row_start:row_end]  # Non-zero values in row i
+        row_indices = B_kron.indices[row_start:row_end]  # Column indices of non-zero values
+
+        edge_indices = [j % N_edges for j in row_indices]  # Extract corresponding edge index
+        node_indices = [j // N_edges for j in row_indices]  # Extract node index
+        
+        lhs.addTerms(row_data, [x[edge_indices[idx], node_indices[idx]] for idx in range(len(row_indices))])
+        # Add constraint for row i
+        m.addConstr(lhs == b[i], name=f"DemandBalance_{i}")
+
+    rp_flow = {}
+    rp_full_flow = {}
+    car_flow = {}
+    A_q_up_flow = {}
+    A_q_down_flow = {}
+
+    for i, edge in enumerate(edge_order):
+        if edge in ridepool:
+            rp_flow[edge] = x.sum(i,'*')
+        elif edge in full_rp:
+            rp_full_flow[i] = x.sum(i,'*')
+        elif edge in car:
+            car_flow[edge] = x.sum(i,'*')
+        elif edge in connector_rp:
+            if "q" in edge[1]:
+                A_q_up_flow[edge] = x.sum(i,"*")
+            elif "q" in edge[0]:
+                A_q_down_flow[edge] = x.sum(i,"*")
+
+    for count,(i,var) in enumerate(rp_full_flow.items()):
+        m.addConstr(var == quicksum(rp_full[k] for k in range(len(rp_list)) if i in rp_list[k]))
+
+    for count,pool in enumerate(rp_list):
+        edge_1 = [int(str(i)[:-1]) for i in edge_order[pool[0]]]
+        edge_2 = [int(str(i)[:-1]) for i in edge_order[pool[1]]]
+        print(edge_1)
+        print(edge_2)
+        sdf
+
+        a = count // N_car_nodes
+        b = count % N_car_nodes
+
+        # if b != a:
+        #     m.addConstr(rp_demand[a,b] == var)
+        # elif b == a:
+        #     m.addConstr(rp_demand[b,b] + quicksum(rp_demand[p,b] for p in range(N_nodes) if p!=b) == 0)
+
+        ### reconstruct routes (NOTE: OD's are reconstructed individually instead of as a pair)
+        # a = count // N_car_nodes
+        # b = count % N_car_nodes
+        
+        # if b != a:
+        #     m.addConstr(rp_demand[a,b] == var)
+        # elif b == a:
+        #     m.addConstr(rp_demand[b,b] + quicksum(rp_demand[p,b] for p in range(N_nodes) if p!=b) == 0)
+
+        # lhs = LinExpr()  # Initialize linear expression for constraint
+        # row_start = B_kron.indptr[count]  # Start of row i in CSR format
+        # row_end = B_kron.indptr[count + 1]  # End of row i
+        # row_data = B_kron.data[row_start:row_end]  # Non-zero values in row i
+        # row_indices = B_kron.indices[row_start:row_end]  # Column indices of non-zero values
+        # edge_indices = [j % N_edges for j in row_indices if edge_order[j%N_edges] in car]  # Extract corresponding edge index
+        # node_indices = [j // N_edges for j in row_indices]  # Extract node index
+        # row_data = [row_data[i] for i in range(len(row_indices)) if edge_order[row_indices[i]%N_edges] in car]
+        # lhs.addTerms(row_data, [rp[edge_indices[idx], node_indices[idx]] for idx in range(len(edge_indices))])
+        # m.addConstr(lhs == rp_demand[a,b], name=f"reconstruct_rp{a}_{b}")
+
+    #### force going back to walking layer at the end of rp trip
+    # m.addConstrs(quicksum(rp_full_flow[j] for j in rp_full_flow.keys() if edge_order[j][1]==i[0])
+    #               == A_q_down_flow[i] for i in A_q_down_flow.keys())
+    ### limit rp flow to outgoing demand
+    # m.addConstrs(quicksum(x[i,j] for i,edge in enumerate(edge_order) if edge in full_rp) <= -b[j + j*N_nodes] for j in range(N_nodes))
+    
+    m.addConstrs((x[i,j] >= 0 for i in range(N_edges) for j in range(N_nodes) if (i,j) in x), name="NonNegativeX")
+    m.addConstrs((x_r[j] >= 0 for j in range(N_edges)), name="NonNegativeXR")
+    
+    ## NOTE: t_0 is relatively high ([60-120]), so there are relatively many vehicles per time unit on the road
+    # maybe t_0 should be scaled?    
+    vehicle_lim = 9000
+    m.addConstr(quicksum(tnet.G_supergraph[edge[0]][edge[1]]['t_0']
+                         *(x.sum(j,'*') + x_r[j]) 
+                         for j,edge in enumerate(edge_order) 
+                         if (isinstance(edge[0],int) and isinstance(edge[1],int)))
+                         + quicksum(sol_costs[i] * rp_full[i] for i in range(len(rp_list)))
+                              <= vehicle_lim)
+
+    #### bad vehicle limit
+    # m.addConstr(quicksum(x.sum(i,"*") + x_r[i] for i,edge in enumerate(edge_order) if edge in As_c_u_flow.keys())
+    #             + quicksum(x.sum(i,'*')/2 for i,edge in enumerate(edge_order) if edge in As_rp_u_flow) <= vehicle_lim)
+
+    # Reshape x variables for incidence matrix constraint
+    m.addConstrs(
+        (quicksum(Binc[i, j] * (x.sum(j,'*') + x_r[j])
+         for j,edge in enumerate(edge_order) if isinstance(edge[0],int) and isinstance(edge[1],int))
+         == 0 for i in range(N_nodes)),
+        name="Incidence")
+    
+    m.update()
+    m.optimize()
+    # Extract solution
+    x_mat = np.zeros((N_edges, N_nodes))
+    for i in range(N_edges):
+        for j in range(N_nodes):
+            if (i,j) in x:
+                x_mat[i,j] = x[i,j].X
+
+    x_r_mat = np.zeros((N_edges))
+    for i in range(N_edges):
+        x_r_mat[i] = x_r[i].X
+    
+    selected_tours = [rp_list[i] for i in range(len(rp_list)) if rp_full[i].X!=0]
+    arc_flows = x_mat.sum(axis=1) + x_r_mat
+    for i in range(N_edges):
+        tnet.G_supergraph[edge_order[i][0]][edge_order[i][1]]['flow'] = arc_flows[i]
+    print(m)
+    print(len(rp_list))
+    return selected_tours
+
+
+@timeit
+def solve_cars_matrix_rp(tnet, sol_costs, fcoeffs, n=3, exogenous_G=False, rebalancing=True, linear=False, LP_method=-1,\
+                       QP_method=-1, a=False, rp_list=[]):
+    
+    ridepool = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'rp']
+    pedestrian = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'p']
+    connector = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'f']
+    connector_rp = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 'fq']
+    car = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == 0]
+    full_rp = [(u, v) for (u, v, d) in tnet.G_supergraph.edges(data=True) if d['type'] == "q"]
+
+    ridepool_nodes = [node for node in tnet.G_supergraph.nodes() if "rp" in str(node)]
+    car_nodes = [node for node in tnet.G_supergraph.nodes() if isinstance(node,int)]
+    
+    node_order = list(tnet.G_supergraph.nodes())
+    edge_order = list(tnet.G_supergraph.edges())
+
+    Binc = nx.incidence_matrix(tnet.G_supergraph, nodelist=node_order, edgelist=edge_order, oriented=True)
+    [N_nodes,N_edges] = Binc.shape
+
+    Binc_car = nx.incidence_matrix(tnet.G, nodelist=tnet.G.nodes(), edgelist=tnet.G.edges(), oriented=True)
+    [N_car_nodes,N_car_edges] = Binc_car.shape
     
 
     node_index_map = {node: i for i, node in enumerate(tnet.G_supergraph.nodes())}
@@ -434,12 +671,15 @@ def solve_cars_matrix(tnet, fcoeffs, n=3, exogenous_G=False, rebalancing=True, l
 
     x = m.addVars(N_edges, N_nodes, vtype=GRB.CONTINUOUS, lb=0, name="x")
     x_r = m.addVars(N_edges, vtype=GRB.CONTINUOUS, lb=0, name="x_r")
-    b_car = m.addVars(N_nodes*N_nodes,lb=-GRB.INFINITY, ub=GRB.INFINITY, name="b_car")
-    
+    rp_full = m.addVars(len(rp_list), lb=0, vtype=GRB.CONTINUOUS, name="rp_full")
+    rp = m.addVars(N_edges, N_nodes, vtype=GRB.CONTINUOUS, lb=0, name="rp")
+    rp_demand = m.addVars(N_nodes,N_nodes, vtype=GRB.CONTINUOUS, lb=-GRB.INFINITY, name="rp_d")
+
     m.update()
     m.setObjective(
         quicksum(FFT[i] * x.sum(i,"*") for i in range(N_edges))
-        + quicksum(FFT[j] * x_r[j] for j in range(N_edges)),
+        + quicksum(FFT[j] * x_r[j] for j in range(N_edges))
+        + quicksum(sol_costs[i] * rp_full[i] for i in range(len(rp_list))),
         GRB.MINIMIZE)
     m.update()
 
@@ -462,74 +702,76 @@ def solve_cars_matrix(tnet, fcoeffs, n=3, exogenous_G=False, rebalancing=True, l
         # Add constraint for row i
         m.addConstr(lhs == b[i], name=f"DemandBalance_{i}")
 
-    # for i in range(B_kron.shape[0]):
-    #     lhs = LinExpr()  # Initialize linear expression for constraint
-    #     row_start = B_kron.indptr[i]  # Start of row i in CSR format
-    #     row_end = B_kron.indptr[i + 1]  # End of row i
-    #     row_data = B_kron.data[row_start:row_end]  # Non-zero values in row i
-    #     row_indices = B_kron.indices[row_start:row_end]  # Column indices of non-zero values
-
-    #     edge_indices = [j % N_edges for j in row_indices]  # Extract corresponding edge index
-    #     node_indices = [j // N_edges for j in row_indices]  # Extract node index
-
-    #     x_car = [x[edge_indices[idx], node_indices[idx]] 
-    #              for idx in range(len(row_indices)) 
-    #              if edge_order[edge_indices[idx]] in car
-    #              ]
-        
-    #     car_data = [row_data[idx] 
-    #                 for idx in range(len(row_indices)) 
-    #                 if edge_order[edge_indices[idx]] in car
-    #                 ]
-    #     lhs.addTerms(car_data, x_car)
-    #     m.addConstr(lhs == b_car[i], name=f"Car_demand{i}")
-
     rp_flow = {}
+    rp_full_flow = {}
     car_flow = {}
     As_rp_u_flow = {}
     As_rp_d_flow = {}
-    As_c_u_flow = {}
-    As_c_d_flow = {}
+    A_q_up_flow = {}
+    A_q_down_flow = {}
 
     for i, edge in enumerate(edge_order):
         if edge in ridepool:
             rp_flow[edge] = x.sum(i,'*')
+        elif edge in full_rp:
+            rp_full_flow[i] = x.sum(i,'*')
         elif edge in car:
             car_flow[edge] = x.sum(i,'*')
-        elif edge in connector:
-            if isinstance(edge[1],int):
-                As_c_u_flow[edge] = x.sum(i,"*")
-            elif isinstance(edge[0],int):
-                As_c_d_flow[edge] = x.sum(i,"*")
         elif edge in connector_rp:
-            if "rp" in edge[1]:
-                As_rp_u_flow[edge] = x.sum(i,"*")
-            elif "rp" in edge[0]:
-                As_rp_d_flow[edge] = x.sum(i,"*")
+            if "q" in edge[1]:
+                A_q_up_flow[edge] = x.sum(i,"*")
+            elif "q" in edge[0]:
+                A_q_down_flow[edge] = x.sum(i,"*")
 
-    for rp_edge in rp_flow.keys():
-        car_edge = (int(rp_edge[0].replace("rp", "")), int(rp_edge[1].replace("rp", "")))
+    for count,(i,var) in enumerate(rp_full_flow.items()):
+        m.addConstr(var == quicksum(rp_full[k] for k in range(len(rp_list)) if i in rp_list[k]))
+
+        ### reconstruct routes (NOTE: OD's are reconstructed individually instead of as a pair)
+        # a = count // N_car_nodes
+        # b = count % N_car_nodes
         
-        if car_edge in car_flow:  # Ensure that the mapped car edge exists
-            m.addConstr(rp_flow[rp_edge] <= 1 * car_flow[car_edge])
+        # if b != a:
+        #     m.addConstr(rp_demand[a,b] == var)
+        # elif b == a:
+        #     m.addConstr(rp_demand[b,b] + quicksum(rp_demand[p,b] for p in range(N_nodes) if p!=b) == 0)
 
-    # x.sum([rp_list[i]],"*") = rp * rp_list[i] for i in range(rp_list)
-    # where rp is a selection variable
-    # rp_list is a list of lists of nodes following the rp order
+        # lhs = LinExpr()  # Initialize linear expression for constraint
+        # row_start = B_kron.indptr[count]  # Start of row i in CSR format
+        # row_end = B_kron.indptr[count + 1]  # End of row i
+        # row_data = B_kron.data[row_start:row_end]  # Non-zero values in row i
+        # row_indices = B_kron.indices[row_start:row_end]  # Column indices of non-zero values
+        # edge_indices = [j % N_edges for j in row_indices if edge_order[j%N_edges] in car]  # Extract corresponding edge index
+        # node_indices = [j // N_edges for j in row_indices]  # Extract node index
+        # row_data = [row_data[i] for i in range(len(row_indices)) if edge_order[row_indices[i]%N_edges] in car]
+        # lhs.addTerms(row_data, [rp[edge_indices[idx], node_indices[idx]] for idx in range(len(edge_indices))])
+        # m.addConstr(lhs == rp_demand[a,b], name=f"reconstruct_rp{a}_{b}")
 
-    # quicksum(x[i,k] + x[j,k] for k in range(N_nodes)) = 2 * rp for i,j in a for a in rp_list)
-    # where rp_list is a list of lists of tuples containing the entry and exit points for a ridepooled ride
+    # rp_list[k] = [edge 1, edge 2]
+    # edge_list[i][0] for i in rp_list[k] ## where edge_list[i] = (node 1q, node 2q)
 
+    #### force going back to walking layer at the end of rp trip
+    # m.addConstrs(quicksum(rp_full_flow[j] for j in rp_full_flow.keys() if edge_order[j][1]==i[0])
+    #               == A_q_down_flow[i] for i in A_q_down_flow.keys())
+
+    m.addConstrs(quicksum(x[i,j] for i,edge in enumerate(edge_order) if edge in full_rp) <= -b[j + j*N_nodes] for j in range(N_nodes))
+    
     m.addConstrs((x[i,j] >= 0 for i in range(N_edges) for j in range(N_nodes)), name="NonNegativeX")
     m.addConstrs((x_r[j] >= 0 for j in range(N_edges)), name="NonNegativeXR")
+    m.addConstrs((rp[i,j] >= 0 for i in range(N_edges) for j in range(N_nodes)), name="NonNegativeRP")
     
     ## NOTE: t_0 is relatively high ([60-120]), so there are relatively many vehicles per time unit on the road
     # maybe t_0 should be scaled?    
-    vehicle_lim = 10000
+    vehicle_lim = 9000
     m.addConstr(quicksum(tnet.G_supergraph[edge[0]][edge[1]]['t_0']
                          *(x.sum(j,'*') + x_r[j]) 
-                         for j,edge in enumerate(edge_order) if isinstance(edge[0],int) and isinstance(edge[1],int))
+                         for j,edge in enumerate(edge_order) 
+                         if (isinstance(edge[0],int) and isinstance(edge[1],int)))
+                         + quicksum(sol_costs[i] * rp_full[i] for i in range(len(rp_list)))
                               <= vehicle_lim)
+
+    #### bad vehicle limit
+    # m.addConstr(quicksum(x.sum(i,"*") + x_r[i] for i,edge in enumerate(edge_order) if edge in As_c_u_flow.keys())
+    #             + quicksum(x.sum(i,'*')/2 for i,edge in enumerate(edge_order) if edge in As_rp_u_flow) <= vehicle_lim)
 
     # Reshape x variables for incidence matrix constraint
     m.addConstrs(
@@ -537,6 +779,7 @@ def solve_cars_matrix(tnet, fcoeffs, n=3, exogenous_G=False, rebalancing=True, l
          for j,edge in enumerate(edge_order) if isinstance(edge[0],int) and isinstance(edge[1],int))
          == 0 for i in range(N_nodes)),
         name="Incidence")
+    
     m.update()
     m.optimize()
     # Extract solution
@@ -548,552 +791,34 @@ def solve_cars_matrix(tnet, fcoeffs, n=3, exogenous_G=False, rebalancing=True, l
     x_r_mat = np.zeros((N_edges))
     for i in range(N_edges):
         x_r_mat[i] = x_r[i].X
-
-    demand_car = np.zeros((N_nodes**2))
-    for i in range(N_nodes**2):
-        demand_car[i] = b_car[i].X
-    demand_car = demand_car.reshape((N_nodes,N_nodes))
     
+    rp_mat = np.zeros((N_edges, N_nodes))
+    for i in range(N_edges):
+        for j in range(N_nodes):
+            rp_mat[i,j] = rp[i,j].X
+    
+    rp_d = np.zeros((N_nodes,N_nodes))
     for i in range(N_nodes):
         for j in range(N_nodes):
-            if demand_car[i,j] != 0:
-                print(f"demand {node_order[i]} to {node_order[j]}: ({node_order[i]},{node_order[j]}) = {demand_car[i,j]}")
-
-
-    arc_flows = x_mat.sum(axis=1) + x_r_mat
+            rp_d[i,j] = rp_demand[i,j].X
+    
+    selected_tours = [rp_list[i] for i in range(len(rp_list)) if rp_full[i].X!=0]
+    # for constr in m.getConstrs():
+    #     if "reconstruct_rp1_1" in constr.ConstrName:
+    #         print(f"Constraint: {constr.ConstrName}")
+    #         expr = m.getRow(constr)
+    #         terms = []
+    #         for i in range(expr.size()):
+    #             var = expr.getVar(i)
+    #             coeff = expr.getCoeff(i)
+    #             value = var.X  # Get the value of the variable
+    #             terms.append(f"{coeff} * {var.VarName} (Value: {value})")
+    #         print(f"Expression: {' + '.join(terms)} = {constr.RHS}")
+    arc_flows = x_mat.sum(axis=1) + x_r_mat + rp_mat.sum(axis=1)
     for i in range(N_edges):
         tnet.G_supergraph[edge_order[i][0]][edge_order[i][1]]['flow'] = arc_flows[i]
-    
-
-
-@timeit
-def solve_cars_rp(tnet, fcoeffs, n=3, exogenous_G=False, rebalancing=True, linear=False, LP_method=-1, QP_method=-1, theta=False, a=False, bush=False, theta_n=3, userCentric=False, od_flows_flag=True):
-    #TODO: implement option to select between origin or destination
-    fc = fcoeffs.copy()
-
-    # create additoinal variables associated with congestion
-    if (theta==False) or (a==False):
-        if userCentric:
-            #fc=fc
-            #fc.insert(0,0)
-            fc = UC_fcoeffs(fc)
-            #print(fc)
-        #else:
-            #fc.insert(0, 0)
-        theta, a, rms  = get_approx_fun(fcoeffs=fc, nlines=n, range_=[0,theta_n], plot=False)
-        #a.append(a[-1])
-    exogenous_G = set_exogenous_flow(tnet, exogenous_G)
-
-    # Start model
-    m = Model('CARS')
-    m.setParam('OutputFlag',0 )
-    m.setParam('BarHomogeneous', 1)
-    #m.setParam("LogToConsole", 0)
-    #m.setParam("CSClientLog", 0)
-    if linear:
-        m.setParam('Method', LP_method)
-    else:
-        m.setParam('Method', QP_method)
-    m.update()
-
-    # Find origins
-    tnet.O = list(set([w[0] for w, d in tnet.g.items() if d > 0]))
-
-    # Define variables
-    if bush == True:
-        [m.addVar(lb=0, name='x^'+str(s)+'_'+str(i)+'_'+str(j)) for i,j in tnet.G_supergraph.edges() for s in tnet.O]
-    else:
-        [m.addVar(lb=0, name='x^' + str(w) + '_' + str(i) + '_' + str(j)) for i, j in tnet.G_supergraph.edges() for w, d in tnet.g.items()]
-
-
-    ### variables for road layer and ride-pool layer specific OD pairs
-    [m.addVar(lb=0, name='q^' + str(w) + '_'+ str(i) + '_' +str(j)) for (i,j),_ in tnet.q.items() for w,_ in tnet.g.items()]
-    [m.addVar(lb=0, name='qrp^' + str(w) + '_'+ str(i) + '_' +str(j)) for (i,j),_ in tnet.q.items() for w,_ in tnet.g.items()]
-    # [m.addVar(name='q_'+ str(i) + '_' +str(j)) for (i,j),_ in tnet.q.items()]
-    # [m.addVar(name='qrp_'+ str(i) + '_' +str(j)) for (i,j),_ in tnet.q.items()]
-    m.update()
-
-
-    if userCentric==True:
-        for i, j in tnet.G_supergraph.edges():
-            if isinstance(i, int) and isinstance(j, int):
-                continue
-            else:
-                for s in tnet.O:
-                    m.addConstr(m.getVarByName('x^'+str(s)+'_'+str(i)+'_'+str(j)) == 0)    
-    
-    # rebalancing variables
-    if rebalancing == True:
-        [m.addVar(lb=0, name='x^R'+str(i)+'_'+str(j)) for i,j in tnet.G.edges()]
-    else:
-        [m.addVar(lb=0, ub=0, name='x^R' + str(i) + '_' + str(j)) for i, j in tnet.G.edges()]
-    m.update()
-
-    #sum all flows belonging to the same OD pair w
-    xu = {(i, j): quicksum(m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j)) for w, d in tnet.g.items()) for i, j in tnet.G_supergraph.edges()}
-    
-    m.update()
-
-    # define objective as the sum of travel times of flows x and a fraction of the rebalancing travel times
-    obj = quicksum(tnet.G_supergraph[i][j]['t_0'] * xu[(i, j)] for i,j,data in tnet.G_supergraph.edges(data=True))
-    gamma = 0.1
-    obj_reb = gamma * quicksum(tnet.G_supergraph[i][j]['t_0']*m.getVarByName(f"x^R{i}_{j}") for i,j in tnet.G.edges())
-    obj += obj_reb
-    m.update()
-
-    # Node imbalance constraints/demand constraint
-    for j in tnet.G_supergraph.nodes():
-        for w,d in tnet.g.items():
-            if j == w[0]:   # if j is origin, the incoming flow + d should equal outgoing flow       
-                m.addConstr(quicksum(m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j))
-                                        for i,l in tnet.G_supergraph.in_edges(nbunch=j)) + d
-                            == quicksum(m.getVarByName('x^'+str(w)+'_'+str(j)+'_'+str(k))
-                                            for l,k in tnet.G_supergraph.out_edges(nbunch=j)))
-            elif j == w[1]: # if j is destination, the incoming flow should equal outgoing flow + d
-                m.addConstr(quicksum(m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j))
-                                        for i,l in tnet.G_supergraph.in_edges(nbunch=j))
-                            == quicksum(m.getVarByName('x^'+str(w)+'_'+str(j)+'_'+str(k))
-                                            for l,k in tnet.G_supergraph.out_edges(nbunch=j)) + d)
-            else:   # just node imbalance constraint, in = out
-                m.addConstr(quicksum(m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j))
-                                        for i,l in tnet.G_supergraph.in_edges(nbunch=j))
-                            == quicksum(m.getVarByName('x^'+str(w)+'_'+str(j)+'_'+str(k))
-                                            for l,k in tnet.G_supergraph.out_edges(nbunch=j)))
-
-    z = m.addVar(vtype=GRB.BINARY, name="z")
-    m.update()
-    ### get OD pairs within the car layer, keep in q_i_j
-    # for i,j in tnet.G_supergraph.edges():
-    #     if ("'" in str(i) or "u" in str(i)) and isinstance(j,int):
-    #         m.addConstrs(m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j)) 
-    #                     == quicksum(m.getVarByName(f'q^{w}_{j}_{x}') 
-    #                                 for x in tnet.G_supergraph.nodes() if isinstance(x,int) and x!=j)
-    #                     for w,_ in tnet.g.items())
-            
-    #         m.addConstrs(m.getVarByName('x^'+str(w)+'_'+str(j)+'_'+str(i))  
-    #                     == quicksum(m.getVarByName(f'q^{w}_{x}_{j}')
-    #                                  for x in tnet.G_supergraph.nodes() if isinstance(x,int) and x!=j)
-    #                                  for w,_ in tnet.g.items() if i!=w[0])
-            
-    # #### get OD pairs within the rp layer, keep in qrp_i_j
-    # for i,j in tnet.G_supergraph.edges():
-    #     if "'" in str(i) and "rp" in str(j):
-    #         m.addConstrs(m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j))
-    #                     == quicksum(m.getVarByName(f'qrp^{w}_{j[:-2]}_{x}')
-    #                                 for x in tnet.G_supergraph.nodes() if isinstance(x,int) and str(x)!=j[:-2])
-    #                                  for w,_ in tnet.g.items())
-    #         m.addConstrs(m.getVarByName('x^'+str(w)+'_'+str(j)+'_'+str(i))
-    #                     == quicksum(m.getVarByName(f'qrp^{w}_{x}_{j[:-2]}')
-    #                                  for x in tnet.G_supergraph.nodes() if isinstance(x,int) and str(x)!=j[:-2])
-    #                                   for w,_ in tnet.g.items() if i!=w[0])
-    # for w,_ in tnet.g.items():
-    #     for i,j in tnet.G_supergraph.edges():
-    #         if "'" in str(i) and isinstance(j,int):
-    #             # m.addConstrs(m.getVarByName(f"x^{w}_{i}_{j}") + m.getVarByName(f"x^{w}_{j}u_{j}")
-    #             #             - quicksum(m.getVarByName(f"x^{w}_{u}_{v}") + m.getVarByName(f"x^{w}_{u}_{u}u")
-    #             #                        for u, v in tnet.G_supergraph.edges()
-    #             #                         if "'" in str(v) and isinstance(u, int) and u != k and u != j)
-    #             #             == m.getVarByName(f"q^{w}_{j}_{k}")
-    #             #             for k in tnet.G_supergraph.nodes() if isinstance(k,int) and k!=j
-    #             #             for w,_ in tnet.g.items())
-    #             m.addConstrs(quicksum(m.getVarByName(f"q^{w}_{j}_{b}") 
-    #                                 for a,b,d in tnet.G_supergraph.edges(data=True) if a==j and b!=u and d['type'] == 0)
-    #                         == (m.getVarByName(f"x^{w}_{i}_{j}") + m.getVarByName(f"x^{w}_{j}u_{j}"))
-    #                         - (m.getVarByName(f"x^{w}_{u}_{v}") + m.getVarByName(f"x^{w}_{u}_{u}u"))
-    #                         for u,v in tnet.G_supergraph.edges() if "'" in str(v) and isinstance(u, int) and u!=i
-    #                         for w,_ in tnet.g.items())
-                
-    #         elif "'" in str(i) and "rp" in str(j):
-    #             # m.addConstrs(m.getVarByName(f"x^{w}_{i}_{j}")
-    #             #             - quicksum(m.getVarByName(f"x^{w}_{u}_{v}")
-    #             #                        for u, v in tnet.G_supergraph.edges()
-    #             #                         if "'" in str(v) and "rp" in str(u) and u != k and u!=j)
-    #             #             == m.getVarByName(f"q^{w}_{j[:-2]}_{k}")
-    #             #             for k in tnet.G_supergraph.nodes() if isinstance(k,int) and k!=j
-    #             #             for w,_ in tnet.g.items())
-    #             m.addConstrs(quicksum(m.getVarByName(f"qrp^{w}_{j}_{b}") 
-    #                                 for a,b,d in tnet.G_supergraph.edges(data=True) if a==j and b!=u and d['type'] == 'rp')
-    #                         == m.getVarByName(f"x^{w}_{i}_{j}")
-    #                         - m.getVarByName(f"x^{w}_{u}_{v}")
-    #                         for u,v in tnet.G_supergraph.edges() if "rp" in str(v) and isinstance(u, int) and u!=j
-    #                         for w,_ in tnet.g.items())
-    
-    
-    # # limit same w ride-pooling
-    # m.addConstrs(m.getVarByName(f"x^{w}_{i}'_{i}rp") 
-    #              <= m.getVarByName(f"x^{w}_{i}'_{i}") + m.getVarByName(f"x^{w}_{i}u_{i}")
-    #             for w,_ in tnet.g.items()           
-    #             for i in tnet.G_supergraph.nodes() if isinstance(i,int))
-    # # limit amount of pickups?
-    # m.addConstrs(m.getVarByName(f"x^{w}_{w[0][:-1]}u_{w[0][:-1]}") == 0 for w,_ in tnet.g.items())
-    
-    
-
-    
-    m.update()
-    if rebalancing==True:
-        add_rebalancing_cnstr(m, tnet, xu)
-
-    # add_bike_cnstr(m, tnet, xu)
-    road_edges = [(i,j) for i,j,data in tnet.G_supergraph.edges(data=True) if data['type']==0]
-
-    #limit ride-pooling to capacity 
-    m.addConstrs(
-    (xu[(str(i) + 'rp', str(j) + 'rp')] <= 3 * xu[(i, j)]
-      for i, j in road_edges ),
-    name="summed_constraint"
-    )
-
-    # m.addConstrs(
-    #     (quicksum(m.getVarByName(f'qrp^{w}_{i}_{j}') for w,_ in tnet.g.items()) 
-    #      <= 3* quicksum (m.getVarByName(f'q^{w}_{i}_{j}') for w,_ in tnet.g.items())
-    #      for i in tnet.G_supergraph.nodes() if isinstance(i,int) for j in tnet.G_supergraph.nodes() if isinstance(j,int) if i!=j)
-    # )
-
-    # only one arc per entry into the ride-pool layer
-    # m.addConstr(quicksum(m.getVarByName(f'qrp^{w}_{i}_{j}') 
-    #                      for i in tnet.G_supergraph.nodes() if isinstance(i,int) 
-    #                      for j in tnet.G_supergraph.nodes() if isinstance(j,int) if i!=j
-    #                      for w,_ in tnet.g.items())
-    #                      == quicksum(xu[(str(i) + "'", str(i) + "rp")] for i in tnet.G_supergraph.nodes() if isinstance(i,int)))
-    # every request can only go into the ride-pool layer or car layer once
-    m.addConstrs(quicksum(m.getVarByName(f"x^{w}_{i}_{j}") 
-                          for i,j,d in tnet.G_supergraph.edges(data=True) if d['type'] == 'f_rp' or d['type'] == 'f')
-                          <= 2*g  for w,g in tnet.g.items())
-    
-
-    num_requests = sum(tnet.g.values())
-    vehicle_lim= 30000
-
-    # ### old vehicle limit
-    # this is not a system wide vehicle limit, more vehicles will be in the network at a given time
-    # this is a "we can get x cars ready for each time unit" limit
-    # vehicle_lim= num_requests * 0.2     # 20% of vehicles, extra 60% CAN use rp, 20% figures can walk
-    # m.addConstr((quicksum(xu[(i,j)] for i,j in tnet.G_supergraph.edges()
-    #                        if isinstance(j, int) and not isinstance(i,int))
-    #                          <= vehicle_lim),name='n_vehicles')
-    # m.addConstr((quicksum(xu[(i,j)] for i,j in tnet.G_supergraph.edges()
-    #                        if "rp" in str(j) and "rp" not in str(i))
-    #                          <= 3*vehicle_lim),name='n_pooling')
-    
-
-    # Limit vehicles per per unit time in total in the network
-    m.addConstr(quicksum(tnet.G_supergraph[i][j]['t_0']*(m.getVarByName('x^R' + str(i) + '_' + str(j))
-                          + quicksum(m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j)) for w,_ in tnet.g.items()))
-                          for i,j,d in tnet.G_supergraph.edges(data=True) if d['type']==0) <= vehicle_lim)
-    m.update()
-    # Solve problem
-    m.setObjective(obj, GRB.MINIMIZE)
-    m.update()
-    m.optimize()
-    status = {2:'optimal', 3:'infeasible !', 4:'infeasible or unbounded !', 5:'unbounded', 6:'cutoff', 7:'time limit'}
-
-
-    # saving  results
-    set_optimal_flows(m, tnet, G_exogenous=exogenous_G, bush=bush)
-    tnet.cars_obj = obj.getValue()
-    if od_flows_flag==True:
-        od_flows = get_OD_result_flows(m, tnet, bush=bush)
-        return tnet, m.Runtime, od_flows
-    else:
-        return tnet, m.Runtime
-
-
-@timeit
-def solve_bush_CARSn(tnet, fcoeffs, n=3, exogenous_G=False, rebalancing=True, linear=False, LP_method=-1, QP_method=-1, theta=False, a=False, bush=False, theta_n=3, userCentric=False, od_flows_flag=True):
-    #TODO: implement option to select between origin or destination
-    fc = fcoeffs.copy()
-    if (theta==False) or (a==False):
-        if userCentric:
-            #fc=fc
-            #fc.insert(0,0)
-            fc = UC_fcoeffs(fc)
-            #print(fc)
-        #else:
-            #fc.insert(0, 0)
-        theta, a, rms  = get_approx_fun(fcoeffs=fc, nlines=n, range_=[0,theta_n], plot=False)
-        #a.append(a[-1])
-    exogenous_G = set_exogenous_flow(tnet, exogenous_G)
-    # Start model
-    m = Model('CARS')
-    m.setParam('OutputFlag',0 )
-    m.setParam('BarHomogeneous', 1)
-    #m.setParam("LogToConsole", 0)
-    #m.setParam("CSClientLog", 0)
-    if linear:
-        m.setParam('Method', LP_method)
-    else:
-        m.setParam('Method', QP_method)
-    m.update()
-
-    # Find origins
-    tnet.O = list(set([w[0] for w, d in tnet.g.items() if d > 0]))
-
-    # Define variables
-    if bush == True:
-        [m.addVar(lb=0, name='x^'+str(s)+'_'+str(i)+'_'+str(j)) for i,j in tnet.G_supergraph.edges() for s in tnet.O]
-    else:
-        [m.addVar(lb=0, name='x^' + str(w) + '_' + str(i) + '_' + str(j)) for i, j in tnet.G_supergraph.edges() for w, d in tnet.g.items()]
-
-    m.update()
-
-    if userCentric==True:
-        for i, j in tnet.G_supergraph.edges():
-            if isinstance(i, int) and isinstance(j, int):
-                continue
-            else:
-                for s in tnet.O:
-                    m.addConstr(m.getVarByName('x^'+str(s)+'_'+str(i)+'_'+str(j)) == 0)
-
-    if rebalancing == True:
-        [m.addVar(lb=0, name='x^R'+str(i)+'_'+str(j)) for i,j in tnet.G.edges()]
-    else:
-        [m.addVar(lb=0, ub=0, name='x^R' + str(i) + '_' + str(j)) for i, j in tnet.G.edges()]
-
-    [m.addVar(name='e^'+str(l)+'_'+str(i)+'_'+str(j), \
-              lb=0)# ub=theta[l+1]-theta[l]) \
-               for i,j in tnet.G.edges() for l in range(n)]
-    #[m.addVar(name='e^'+str(n+1)+'_'+str(i)+'_'+str(j), lb=0) for i,j in tnet.G.edges()]
-    m.update()
-
-    if bush==True:
-        xu = {(i, j): quicksum(m.getVarByName('x^'+str(s)+'_'+str(i)+'_'+str(j)) for s in tnet.O) for i, j in tnet.G_supergraph.edges()}
-    else:
-        xu = {(i, j): quicksum(m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j)) for w, d in tnet.g.items()) for i, j in tnet.G_supergraph.edges()}
-
-    # Set Obj
-    obj = get_obj_CARSn(m, tnet, xu, theta, a, exogenous_G, linear=linear)
-
-    # Set Constraints
-    add_epsilon_cnstr(m, tnet, xu, n, theta, exogenous_G)
-    m.update()
-    
-    add_demand_cnstr(m, tnet, xu,  bush=bush)
-    if rebalancing==True:
-        add_rebalancing_cnstr(m, tnet, xu)
-
-    add_bike_cnstr(m, tnet, xu)
-
-    # Solve problem
-    m.setObjective(obj, GRB.MINIMIZE)
-    m.update()
-    m.optimize()
-    status = {2:'optimal', 3:'infeasible !', 4:'infeasible or unbounded !', 5:'unbounded', 6:'cutoff', 7:'time limit'}
-    #print('solver stats: ' + status[GRB.OPTIMAL])
-
-    # saving  results
-    set_optimal_flows(m, tnet, G_exogenous=exogenous_G, bush=bush)
-    tnet.cars_obj = obj.getValue()
-    if od_flows_flag==True:
-        od_flows = get_OD_result_flows(m, tnet, bush=bush)
-        return tnet, m.Runtime, od_flows
-    else:
-        return tnet, m.Runtime
-
-'''
-def solve_CARS2(tnet, fcoeffs, exogenous_G=False, rebalancing=True):
-    #TODO: add description
-    fun = get_approx_fun(fcoeffs, range_=[0,2])
-    #beta = get_beta(fun)
-    #theta = get_theta(fun)
-    #theta = [0.9, 1.5] #BPR EMA
-    #beta = [1.0, 1.88] #BPR EMA
-    #theta = [0.7, 1.2] #BPR NYC
-    #beta = [0.5, 1.88] #BPR NYC
-    theta = [0.7, 1.2] #estimated NYC
-    beta = [0.5, 2.4] #estimated NYC
-    #theta = [1.19, 1.2] #CARS
-    #beta = [2.44, 2.45] #CARS
-
-    #print(theta)
-    #print(beta)
-
-    Vt, Vd, Ve = set_CARS_par(tnet)
-
-    # Set exogenous flow
-    if exogenous_G == False:
-        exogenous_G = tnet.G_supergraph.copy()
-        for i,j in tnet.G_supergraph.edges():
-            exogenous_G[i][j]['flow'] = 0
-
-    # Start model
-    m = Model('QP')
-    m.setParam('OutputFlag',0)
-    m.setParam('BarHomogeneous', 1)
-    m.setParam('Method', 1)
-    m.update()
-
-    # Define variables
-    [m.addVar(lb=0, name='x^'+str(w)+'_'+str(i)+'_'+str(j)) for i,j in tnet.G_supergraph.edges() for w in tnet.g.keys()]
-
-    if rebalancing == True:
-        [m.addVar(lb=0, name='x^R'+str(i)+'_'+str(j)) for i,j in tnet.G.edges()]
-    else:
-        [m.addVar(lb=0, ub=0, name='x^R' + str(i) + '_' + str(j)) for i, j in tnet.G.edges()]
-
-    [m.addVar(lb=0, name='e^1_'+str(i)+'_'+str(j)) for i,j in tnet.G_supergraph.edges()]
-    [m.addVar(lb=0, name='e^2_'+str(i)+'_'+str(j)) for i,j in tnet.G_supergraph.edges()]
-
-    xu = {(i, j): quicksum(m.getVarByName('x^' + str(w) + '_' + str(i) + '_' + str(j)) for w, d in tnet.g.items()) for i, j in tnet.G_supergraph.edges()}
-
-    m.update()
-
-    # Set objective
-    obj = 0
-
-    for i,j in tnet.G_supergraph.edges():
-        obj += Vt *tnet.G_supergraph[i][j]['t_0'] * quicksum(m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j)) for w in tnet.g.keys()) \
-            + Vt * (tnet.G_supergraph[i][j]['t_0'] * beta[0]/tnet.G_supergraph[i][j]['capacity']) * m.getVarByName('e^1_'+str(i)+'_'+str(j)) \
-                * (m.getVarByName('e^1_'+str(i)+'_'+str(j)) + theta[0]*tnet.G_supergraph[i][j]['capacity'] - exogenous_G[i][j]['flow']) \
-            + Vt * (tnet.G_supergraph[i][j]['t_0'] * beta[1]/tnet.G_supergraph[i][j]['capacity']) * m.getVarByName('e^2_'+str(i)+'_'+str(j)) \
-                * (m.getVarByName('e^2_'+str(i)+'_'+str(j)) + theta[1]*tnet.G_supergraph[i][j]['capacity'] - exogenous_G[i][j]['flow']) \
-            + Vt * (tnet.G_supergraph[i][j]['t_0'] * beta[0]/tnet.G_supergraph[i][j]['capacity'] * m.getVarByName('e^2_'+str(i)+'_'+str(j)) \
-                * (theta[1]*tnet.G_supergraph[i][j]['capacity'] - theta[0]*tnet.G_supergraph[i][j]['capacity']) )
-
-    for i,j in tnet.G.edges():
-        obj +=  (Vd * tnet.G_supergraph[i][j]['t_0'] + Ve * tnet.G_supergraph[i][j]['e']) * ( \
-                #sum(m.getVarByName('x^' + str(w) + '_' + str(i) + '_' + str(j)) for w in tnet.g.keys()) +\
-                m.getVarByName('x^R' + str(i) + '_' + str(j)))
-    m.update()
-
-    # Set Constraints
-    add_demand_cnstr(m, tnet, xu)
-    if rebalancing==True:
-        add_rebalancing_cnstr(m,tnet, xu)
-    for i,j in tnet.G.edges():
-        m.addConstr(m.getVarByName('e^1_'+str(i)+'_'+str(j)) >= quicksum(m.getVarByName('x^' + str(w) + '_' + str(i) + '_' + str(j)) for w in tnet.g.keys()) +  m.getVarByName('x^R'+str(i)+'_'+str(j)) + exogenous_G[i][j]['flow'] - theta[0]*tnet.G[i][j]['capacity'] - m.getVarByName('e^2_'+str(i)+'_'+str(j)))
-        m.addConstr(m.getVarByName('e^2_'+str(i)+'_'+str(j)) >= quicksum(m.getVarByName('x^' + str(w) + '_' + str(i) + '_' + str(j)) for w in tnet.g.keys()) +  m.getVarByName('x^R'+str(i)+'_'+str(j)) + exogenous_G[i][j]['flow'] - theta[1]*tnet.G[i][j]['capacity'])
-    m.update()
-
-    # Solve problem
-    m.setObjective(obj, GRB.MINIMIZE)
-    m.update()
-    m.optimize()
-
-    # saving  results
-    set_optimal_flows(m, tnet)
-    tnet.cars_obj = obj.getValue()
-    od_flows = get_OD_result_flows(m, tnet)
-    return tnet, m.Runtime, od_flows
-
-
-
-def solve_CARS(tnet, fcoeffs, exogenous_G=False, rebalancing=True, xa=0.01):
-    fun = get_approx_fun(fcoeffs, xa=xa, nlines=2, range_=[0,2])
-    beta = get_beta(fun)
-    theta = get_theta(fun)
-
-    #print(beta)
-    #print(theta)
-
-    Vt, Vd, Ve = set_CARS_par(tnet)
-    # Set exogenous flow
-    if exogenous_G == False:
-        exogenous_G = tnet.G_supergraph.copy()
-        for i,j in tnet.G_supergraph.edges():
-            exogenous_G[i][j]['flow'] = 0
-
-    m = Model('QP')
-    m.setParam('OutputFlag',0)
-    m.setParam('BarHomogeneous', 1)
-    m.setParam('Method', 1)
-    m.update()
-
-    # Define variables
-    [m.addVar(lb=0, name='x^'+str(w)+'_'+str(i)+'_'+str(j)) for i,j in tnet.G_supergraph.edges() for w in tnet.g.keys()]
-
-    if rebalancing == True:
-        [m.addVar(lb=0, name='x^R'+str(i)+'_'+str(j)) for i,j in tnet.G.edges()]
-    else:
-        [m.addVar(lb=0, ub=0, name='x^R' + str(i) + '_' + str(j)) for i, j in tnet.G.edges()]
-
-    [m.addVar(lb=0, name='e^1_'+str(i)+'_'+str(j)) for i,j in tnet.G_supergraph.edges()]
-    m.update()
-
-    xu = {(i, j): quicksum(m.getVarByName('x^' + str(w) + '_' + str(i) + '_' + str(j)) for w, d in tnet.g.items()) for
-          i, j in tnet.G_supergraph.edges()}
-
-    # Set objective
-    obj = 0
-    for i,j in tnet.G_supergraph.edges():
-        for w in tnet.g.keys():
-            obj += Vt * tnet.G_supergraph[i][j]['t_0'] * m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j))
-        obj += Vt * (tnet.G_supergraph[i][j]['t_0'] * beta[0]/tnet.G_supergraph[i][j]['capacity']) * m.getVarByName('e^1_'+str(i)+'_'+str(j)) \
-            * (m.getVarByName('e^1_'+str(i)+'_'+str(j)) + theta[0]*tnet.G_supergraph[i][j]['capacity'] - exogenous_G[i][j]['flow'])
-    for i,j in tnet.G.edges():
-        obj += (Vd * tnet.G_supergraph[i][j]['t_0'] + Ve * tnet.G_supergraph[i][j]['e']) * ( \
-                    #sum(m.getVarByName('x^'+str(w)+'_'+str(i)+'_'+str(j)) for w in tnet.g.keys())  \
-                    m.getVarByName('x^R'+str(i)+'_'+str(j)))
-    m.update()
-
-    # Set Constraints
-    add_demand_cnstr(m, tnet, xu)
-    if rebalancing==True:
-        add_rebalancing_cnstr(m,tnet, xu)
-
-    for i,j in tnet.G.edges():
-        m.addConstr(m.getVarByName('e^1_'+str(i)+'_'+str(j))  >= quicksum(m.getVarByName('x^' + str(w) + '_' + str(i) + '_' + str(j)) for w in tnet.g.keys()) +  m.getVarByName('x^R'+str(i)+'_'+str(j)) + exogenous_G[i][j]['flow'] - theta[0]* tnet.G[i][j]['capacity'])
-    m.update()
-
-    m.setObjective(obj, GRB.MINIMIZE)
-    m.update()
-    m.optimize()
-    # saving  results
-    set_optimal_flows(m, tnet)
-    tnet.cars_obj = obj.getValue()
-    return tnet, m.Runtime
-
-
-
-def get_obj_CARSn(m, tnet, xu, theta, a, exogenous_G, linear=True, userCentric=False):
-    if userCentric != True:
-        if linear == True:
-            Vt, Vd, Ve = set_CARS_par(tnet)
-            obj = quicksum(Vt * tnet.G_supergraph[i][j]['t_0'] * xu[(i,j)] for i,j in tnet.G_supergraph.edges())
-            for i,j in tnet.G_supergraph.edges():
-                t0 = tnet.G_supergraph[i][j]['t_0']
-                for l in range(len(theta)-1):
-                    mij = tnet.G_supergraph[i][j]['capacity']
-                    ue = exogenous_G[i][j]['flow']
-                    Vtt_0al = Vt * t0 * a[l]/mij
-                    e_l = m.getVarByName('e^'+str(l)+'_'+str(i)+'_'+str(j))
-                    obj += quicksum(Vtt_0al * e_l * ((theta[k + 1] - theta[k]) * mij - ue) for k in range(l))
-                    obj += Vtt_0al * (e_l*(theta[l+1]-theta[l])*mij - e_l*ue)
-                    obj += quicksum(Vtt_0al * ((theta[l+1] - theta[l])*mij * m.getVarByName('e^'+str(k)+'_'+str(i)+'_'+str(j)) - e_l*ue) for k in range(l+1, len(theta)-1))
-        else:
-            Vt, Vd, Ve = set_CARS_par(tnet)
-            obj = quicksum(Vt * tnet.G_supergraph[i][j]['t_0'] * xu[(i,j)] for i,j in tnet.G_supergraph.edges())
-            for i,j in tnet.G_supergraph.edges():
-                t0 = tnet.G_supergraph[i][j]['t_0']
-                for l in range(len(theta)-1):
-                    mij = tnet.G_supergraph[i][j]['capacity']
-                    ue = exogenous_G[i][j]['flow']
-                    Vtt_0al = Vt * t0 * a[l]/mij
-                    e_l = m.getVarByName('e^'+str(l)+'_'+str(i)+'_'+str(j))
-                    obj += quicksum(Vtt_0al * e_l * ((theta[k + 1] - theta[k]) * mij - ue) for k in range(l))
-                    obj += Vtt_0al * (e_l * e_l - e_l * ue)
-                    obj += quicksum(Vtt_0al * ((theta[l+1] - theta[l])*mij * m.getVarByName('e^'+str(k)+'_'+str(i)+'_'+str(j)) - e_l*ue) for k in range(l+1, len(theta)-1))
-    else:
-        #if linear == True:
-        Vt, Vd, Ve = set_CARS_par(tnet)
-        obj = 0
-        obj = quicksum(Vt * tnet.G_supergraph[i][j]['t_0'] for i,j in tnet.G_supergraph.edges())
-        for i,j in tnet.G_supergraph.edges():
-            t0 = tnet.G_supergraph[i][j]['t_0']
-            mij = tnet.G_supergraph[i][j]['capacity']
-            ue = exogenous_G[i][j]['flow']
-            for l in range(len(theta)-1):
-                Vtt_0al = Vt * t0 * a[l] / mij
-                e_l = m.getVarByName('e^' + str(l) + '_' + str(i) + '_' + str(j))
-                obj += quicksum(Vtt_0al * e_l / ((theta[k + 1] - theta[k]) * mij - ue) for k in range(l))
-                obj += Vtt_0al * (1 - e_l / ue)#Vtt_0al * (e_l * e_l - e_l * ue)
-                obj += quicksum(Vtt_0al * ((theta[l + 1] - theta[l]) * mij / m.getVarByName(
-                    'e^' + str(k) + '_' + str(i) + '_' + str(j)) - e_l * ue) for k in range(l + 1, len(theta) - 1))
-
-
-    obj += quicksum((Vd * tnet.G_supergraph[i][j]['t_0'] + Ve * tnet.G_supergraph[i][j]['e']) * m.getVarByName('x^R' + str(i) + '_' + str(j)) for i,j in tnet.G_supergraph.edges())
-    return obj
-'''
+    print(m)
+    return selected_tours
 
 
 def get_CARS_obj_val(tnet, G_exogenous):

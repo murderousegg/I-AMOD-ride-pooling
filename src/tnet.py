@@ -122,7 +122,7 @@ class tNet():
             [G2.add_edge(j[:-1] + symb, j, t_0=10/60/60, capacity=capacity, type='f_rp', length=0.1) for i, j in self.G_supergraph.edges() if "'" in str(i) and "'" in str(j)]
         self.G_supergraph = G2
 
-    def build_full_layer(self):
+    def build_full_dict(self):
         q_dict = {(i, j) : 0
                     for i in self.G_supergraph.nodes() if isinstance(i,int)
                     for j in self.G_supergraph.nodes() if isinstance(j,int)
@@ -133,6 +133,13 @@ class tNet():
                     if i!=j}
         self.qrp = qrp_dict
         self.q = q_dict
+
+    def build_full_layer(self):
+        G2 = self.G_supergraph.copy()
+        [G2.add_edge(str(i) + "q",str(j)+"q", t_0=10/60/60, length=100, capacity=10000, type="q") for i in self.G_supergraph.nodes() if isinstance(i,int) for j in self.G_supergraph.nodes() if isinstance(j,int) if i!=j]
+        [G2.add_edge(str(i), str(i)[:-1] + "q", t_0=10/60/60, length=100, capacity=10000, type="fq") for i in self.G_supergraph.nodes() if "'" in str(i)]
+        [G2.add_edge(str(i)[:-1] + "q", str(i), t_0=10/60/60, length=100, capacity=10000, type="fq") for i in self.G_supergraph.nodes() if "'" in str(i)]
+        self.G_supergraph = G2
 
     def build_pickup_layer(self):
         G2 = self.G_supergraph.copy()
