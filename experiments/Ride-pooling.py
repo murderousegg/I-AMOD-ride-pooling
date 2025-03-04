@@ -31,7 +31,7 @@ import networkx as nx
 import re
 import copy
 
-netFile, gFile, fcoeffs,_,_ = tnet.get_network_parameters('NYC_Uber_small')
+netFile, gFile, fcoeffs,_,_ = tnet.get_network_parameters('NYC_small')
 
 tNet = tnet.tNet(netFile=netFile, gFile=gFile, fcoeffs=fcoeffs)
 tNetExog = tnet.tNet(netFile=netFile, gFile=gFile, fcoeffs=fcoeffs)
@@ -42,39 +42,41 @@ og_graph = tNet.G_supergraph.copy()
 #integer demands:
 tNet.g = {key: int(round(value)) for key, value in tNet.g.items()}
 
+pos = nx.nx_agraph.graphviz_layout(tNet.G_supergraph, prog='neato')
+
 # origins in walking layer
 new_origins = {(f"{k[0]}'",f"{k[1]}'"): v for k, v in tNet.g.items()}
 tNet.g = new_origins
 
 #build other layers
-tNet.build_rp_layer(avg_speed=1000)
+# tNet.build_rp_layer(avg_speed=1000)
+tNet.build_layer(one_way=False, avg_speed=10, symb="b")
 tNet.build_full_layer()
 # tNet.build_pickup_layer()
 
-ridepool = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d['type'] == 'rp']
+# ridepool = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d['type'] == 'rp']
 pedestrian = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d['type'] == 'p']
 connector = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d['type'] == 'f']
 connector_rp = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d['type'] == 'f_rp']
 
 
-node_order = list(tnet.G_supergraph.nodes())
-edge_order = list(tnet.G_supergraph.edges())
+node_order = list(tNet.G_supergraph.nodes())
+edge_order = list(tNet.G_supergraph.edges())
 
 
-Binc = nx.incidence_matrix(tnet.G_supergraph, nodelist=node_order, edgelist=edge_order, oriented=True)
+Binc = nx.incidence_matrix(tNet.G_supergraph, nodelist=node_order, edgelist=edge_order, oriented=True)
 [N_nodes,N_edges] = Binc.shape
 
-
-node_index_map = {node: i for i, node in enumerate(tnet.G_supergraph.nodes())}
+node_index_map = {node: i for i, node in enumerate(tNet.G_supergraph.nodes())}
 demand_matrix = np.zeros((N_nodes, N_nodes))  # Square matrix
 
-for (origin, destination), demand in tnet.g.items():
+for (origin, destination), demand in tNet.g.items():
     if origin in node_index_map and destination in node_index_map:
         i = node_index_map[origin]
         j = node_index_map[destination]
         demand_matrix[i, j] = demand  # Assign demand from origin to destination
-for ii in range(N_nodes):
-    demand_matrix[ii][ii] = -np.sum(demand_matrix[:][ii]) - demand_matrix[ii][ii]
+# for ii in range(N_nodes):
+#     demand_matrix[ii][ii] = -np.sum(demand_matrix[:][ii]) - demand_matrix[ii][ii]
 
 # loading mat files
 CITY_FOLDER = "NYC_small"
@@ -82,10 +84,6 @@ DemandS = demand_matrix             #store demand
 
 # Generating the diagraph
 edgeList = edge_order
-
-#convert for sioux falls
-if CITY_FOLDER == 'SF':
-    DemandS = DemandS/24
 
 # for the main_K_general function
 OriginalDemand= np.array(DemandS)
@@ -100,17 +98,18 @@ MULTIPLIER = [0.0078, 0.0156, 0.0312, 0.0625, 0.125, 0.25, 0.5, 1, 2]
 # Copy for replicating matlab figures
 # MULTIPLIER = [0.0156, 0.0312, 0.0625, 0.125, 0.25, 0.5, 1, 2]
 
-
+Binc_road = nx.incidence_matrix(tNet.G)
+[N_nodes_road,N_edges_road] = Binc_road.shape
 
 def A1_SP():
     """
     Generates a matrix of dictionaries containing the costs of an arc, 
     a sparse matrix with the possible arcs and the times between destinations
     """
-    solPart = [[{} for _ in range(N_nodes)] for _ in range(N_nodes)]
-    for ii in range(0,N_nodes):
-        for jj in range(0,N_nodes):
-            Dems = np.zeros([N_nodes, N_nodes])
+    solPart = [[{} for _ in range(N_nodes_road)] for _ in range(N_nodes_road)]
+    for ii in range(0,N_nodes_road):
+        for jj in range(0,N_nodes_road):
+            Dems = np.zeros([N_nodes_road, N_nodes_road])
             #generate demand matrix
             Dems[ii,jj] = 1
             Dems[jj,jj] = -1
@@ -118,8 +117,7 @@ def A1_SP():
             if ii==jj:  #special case, set demand to 0 if origin and destination are equal
                 Dems[jj,jj] = -0
             
-            D = nx.shortest_path_length(tNet.G_supergraph, source=jj+1, target=ii+1, weight='weight')
-            
+            D = nx.shortest_path_length(tNet.G, source=node_order[jj], target=node_order[ii], weight="t_0")            
             # Store the results in solPart[jj][ii] as a dictionary
             solPart[jj][ii] = {
                 'obj': D,
@@ -129,7 +127,6 @@ def A1_SP():
     # convert to dictionary for .mat convertion
     solPart_dic = {"solPart": np.array(solPart)}
     io.savemat(CITY_FOLDER + "/solPart_pyth_" + CITY_FOLDER+ ".mat", solPart_dic)
-            
     return solPart
 
 def compute_LinearComb2_for_jj1(jj1, N_nodes, DemandS, solPart):
@@ -155,19 +152,24 @@ def compute_LinearComb2_for_jj1(jj1, N_nodes, DemandS, solPart):
     for ii1 in range(0,N_nodes):
         for ii2 in range(ii1,N_nodes):
             for jj2 in range(jj1,N_nodes):
-                # only calculate when start and ends are not the same, and demands nonzero
-                if not np.any([ii2 == jj2, ii1 == jj2, ii2 == jj1, ii1 == jj1, DemandS[ii1, jj1] == 0, DemandS[ii2, jj2] == 0]):
+                # only calculate when start and ends are not the same
+                if not np.any([node_order[ii2] == node_order[jj2], node_order[ii1] == node_order[jj1],\
+                                node_order[ii1] == node_order[jj2], node_order[ii2] == node_order[jj1],\
+                                      node_order[jj1] == node_order[jj2]]):
                     # find the minimum cost for combination
-                    opti = np.array([LTIFM2_SP(jj1,ii1,jj2,ii2,solPart),
-                                     LTIFM2_SP(jj2,ii2,jj1,ii1,solPart)])
+                    opti = np.array([LTIFM2_SP(jj1,ii1,jj2,ii2,solPart, node_order),
+                                     LTIFM2_SP(jj2,ii2,jj1,ii1,solPart, node_order)])
+                    # if jj1 == 1 and jj2 == 3 and ii1 == 21 and ii2 == 24:
+                    #     print(opti)
+                    #     sfs
                     opti = opti[np.lexsort(opti[:, ::-1].T)]
                     sol2_LC[counter,:] = opti[0,:] # matrix with objective, delays, order
                     counter = counter+1
     sol2_LC = sol2_LC[:counter, :] # trim unused rows
     # remove rows with zero costs and large delays
     sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,0] == 0 ),0)  #cost
-    sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,2] > 20 ),0)  #delay
-    sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,1] > 20 ),0)  #delay
+    sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,2] > 5 ),0)  #delay
+    sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,1] > 5 ),0)  #delay
     #store in .npy file
     np.save(CITY_FOLDER + "/L2/MatL2_" + f"{jj1+1}.npy", sol2_LC)
     return sol2_LC
@@ -197,12 +199,13 @@ def A2_LinearComb2(solPart):
 
     #using joblib:
     results = Parallel(n_jobs=4)(
-        delayed(compute_LinearComb2_for_jj1)(jj1, N_nodes, DemandS, solPart)
-        for jj1 in tqdm(range(N_nodes), desc="Processing jj1 values")
+        delayed(compute_LinearComb2_for_jj1)(jj1, N_nodes_road, DemandS, solPart)
+        for jj1 in tqdm(range(N_nodes_road), desc="Processing jj1 values")
     )
     #store total in .mat file
     sol2_LC_arr = np.asarray([val for row in results for val in row])
     np.save(CITY_FOLDER + "/MatL2.npy", sol2_LC_arr)
+    return sol2_LC_arr
 
 
 def compute_LinearComb3_for_jj1(ii1,jj1, N_nodes, DemandS, solPart):
@@ -226,10 +229,10 @@ def compute_LinearComb3_for_jj1(ii1,jj1, N_nodes, DemandS, solPart):
     # large empty array for storing data
     sol3_LC = np.zeros([100000,16]);  
     counter=0
-    for jj2 in range(jj1,N_nodes):
-        for ii2 in range(ii1,N_nodes):
-            for jj3 in range(jj2,N_nodes):
-                for ii3 in range(ii2,N_nodes):
+    for jj2 in range(jj1,N_nodes_road):
+        for ii2 in range(ii1,N_nodes_road):
+            for jj3 in range(jj2,N_nodes_road):
+                for ii3 in range(ii2,N_nodes_road):
                     # only calculate when start and ends are not the same, and demands nonzero
                     if not np.any([ii1 == jj1, ii1 == jj2, ii1 == jj3, ii2 == jj1, ii2 == jj2, ii2 == jj3,
                             ii3 == jj1, ii3 == jj2, ii3 == jj3, DemandS[ii1, jj1] == 0, DemandS[ii2, jj2] == 0, DemandS[ii3, jj3] == 0]):
@@ -279,10 +282,10 @@ def A2_LinearComb3(solPart):
     
     #using joblib:
     sol3_LC_list = []
-    for jj1 in tqdm(range(N_nodes), desc="Processing jj1 values", ncols=100):
+    for jj1 in tqdm(range(N_nodes_road), desc="Processing jj1 values", ncols=100):
         sol3_LC = Parallel(n_jobs=6)(
             delayed(compute_LinearComb3_for_jj1)(ii1, jj1, N_nodes, DemandS, solPart)
-            for ii1 in tqdm(range(N_nodes), desc="Processing ii1 values", leave=False)
+            for ii1 in tqdm(range(N_nodes_road), desc="Processing ii1 values", leave=False)
         ) 
         sol3_LC_list.append(np.vstack(sol3_LC))
     sol3_LC_arr = np.vstack(sol3_LC_list)
@@ -314,11 +317,11 @@ def compute_LinearComb4_for_jj1(ii1, jj1, N_nodes, DemandS, solPart):
         sol4_LC = np.zeros([700000,21]);  
         counter=0
         #loops
-        for ii2 in range(ii1,N_nodes):
-            for jj3 in range(jj2,N_nodes):
-                for ii3 in range(ii2,N_nodes):
-                    for jj4 in range(jj3,N_nodes):
-                        for ii4 in range(ii3,N_nodes):
+        for ii2 in range(ii1,N_nodes_road):
+            for jj3 in range(jj2,N_nodes_road):
+                for ii3 in range(ii2,N_nodes_road):
+                    for jj4 in range(jj3,N_nodes_road):
+                        for ii4 in range(ii3,N_nodes_road):
                             # only calculate when start and ends are not the same, and demands nonzero
                             if not any([ii1==jj1,ii1==jj2,ii1==jj3,ii1==jj4,ii2==jj1,ii2==jj2,ii2==jj3,ii2==jj4,ii3==jj1,ii3==jj2,
                                         ii3==jj3,ii3==jj4,ii4==jj1,ii4==jj2,ii4==jj3,ii4==jj4,
@@ -372,10 +375,10 @@ def A2_LinearComb4(solPart):
     #     results = pool.starmap(compute_LinearComb4_for_jj1, [(jj1, N_nodes, DemandS, solPart) for jj1 in range(N_nodes)])
     #using joblib:
     sol4_LC_list = []
-    for jj1 in tqdm(range(N_nodes), desc="Processing jj1 values", ncols=100):
+    for jj1 in tqdm(range(N_nodes_road), desc="Processing jj1 values", ncols=100):
         sol4_LC = Parallel(n_jobs=6)(
             delayed(compute_LinearComb4_for_jj1)(ii1, jj1, N_nodes, DemandS, solPart)
-            for ii1 in tqdm(range(N_nodes), desc="Processing ii1 values", leave=False)
+            for ii1 in tqdm(range(N_nodes_road), desc="Processing ii1 values", leave=False)
         ) 
         sol4_LC_list.append(np.vstack(sol4_LC))
     sol4_LC_arr = np.vstack(sol4_LC_list)
@@ -680,6 +683,27 @@ def plot_groups():
                 plt.savefig(f"{CITY_FOLDER}/Result_plots/Composition/Ppl{Ppl}Delay{Delay}WTime{WaitingTime}.png", dpi=150)
                 plt.close()
 
+def create_pickup_dropoff_list(sol_LC):
+    rp_list = []
+    edge_list = []
+    for i in range(sol_LC.shape[0]):
+        node_idx = sol_LC[i,3:7]
+        order_idx = sol_LC[i,7:11]
+        part_1 = node_idx[order_idx == 1]
+        part_2 = node_idx[order_idx == 2]
+        edge_list.append([part_1,part_2])
+        edge_1=0
+        edge_2=0
+        for j in range(len(edge_order)):
+            if edge_order[j] == (str(int(part_1[0]))+"q",str(int(part_1[1])) + "q"):
+                edge_1 = j
+            elif edge_order[j] == (str(int(part_2[0]))+"q", str(int(part_2[1])) + "q"):
+                edge_2 = j
+        rp_list.append([edge_1,edge_2])
+    rp_list_np = np.asarray(rp_list)
+    np.save("rp_list.npy", rp_list_np)
+    np.save("rp_edge_list.npy", edge_list)
+    return rp_list
 
 
 def main():
@@ -687,7 +711,112 @@ def main():
     solPart = A1_SP()
 
     # ### create solutions for different amount of linear combinations
-    # sol2_LC = A2_LinearComb2(solPart)
+    sol2_LC = A2_LinearComb2(solPart)
+    rp_list = create_pickup_dropoff_list(sol2_LC)
+    # rp_list_np = np.load("rp_list.npy")
+    # rp_list = rp_list_np
+
+    selected_tours = cars.solve_cars_matrix_rp_reduced(tNet,fcoeffs=fcoeffs, rebalancing=False, rp_list=rp_list, sol_costs=-sol2_LC[:,0])
+    G_final = tNet.G_supergraph
+
+    real_tours = []
+    for i in selected_tours:
+        sub_tours = []
+        for j in i:
+            sub_tours.append(edge_order[j])
+        real_tours.append(sub_tours)
+    print(f"real_tours: {real_tours}")
+        
+
+    # Extract edge labels (flow values)
+    for u, v in G_final.edges():
+        G_final[u][v]['flow'] = round(G_final[u][v]['flow'])
+
+    normal_edges = []
+    rp_edges = []
+    edge_labels_1 = {}
+    edge_labels_2 = {}
+
+    flow = {(i,j):G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']==0}  # car flow
+    rp_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='rp'}  # 'rp' flow
+    ped_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='p'}
+    b_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='b'}
+    q_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='q' if G_final[i][j]['flow'] != 0}
+    qf_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'fq' if G_final[i][j]['flow'] != 0} 
+    f_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'f'}
+    frp_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'f_rp'}
+    fu_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'u'}
+    print(f"f: {sum(f_flow.values())/2}")
+    print(f"frp: {sum(frp_flow.values())/2}")
+    print(f"fu: {sum(fu_flow.values())/2}")
+    print(f"q flow: {q_flow}")
+    print(f"qf flow: {qf_flow}")
+
+    ped_labels_1 = {}
+    ped_labels_2 = {}
+    for i,j,t in G_final.edges(data=True):
+        if t['type'] == 0:
+            if i>j:
+                if ped_flow[(i,j)] > 0 and b_flow[(i,j)] > 0:
+                    ped_labels_1[(i,j)] = f"{i} to {j}\nP: {ped_flow[(i,j)]}\nb: {b_flow[(i,j)]}"
+                elif ped_flow[(i,j)] > 0:
+                    ped_labels_1[(i,j)] = f"{i} to {j}\nP: {ped_flow[(i,j)]}"
+                elif b_flow[(i,j)] > 0:
+                    ped_labels_1[(i,j)] = f"{i} to {j}\nb: {b_flow[(i,j)]}"
+                    
+            if i<j:
+                if ped_flow[(i,j)] > 0 and b_flow[(i,j)] > 0:
+                    ped_labels_2[(i,j)] = f"{i} to {j}\nP: {ped_flow[(i,j)]}\nb: {b_flow[(i,j)]}"
+                elif ped_flow[(i,j)] > 0:
+                    ped_labels_2[(i,j)] = f"{i} to {j}\nP: {ped_flow[(i,j)]}"
+                elif b_flow[(i,j)] > 0:
+                    ped_labels_2[(i,j)] = f"{i} to {j}\nb: {b_flow[(i,j)]}"
+                    
+
+
+    for i,j,t in G_final.edges(data=True):
+        if t['type'] ==0:
+            # Create label with both flow values (if applicable)
+            if i>j:
+                if flow[(i,j)] > 0:
+                    edge_labels_1[(i, j)] = f"{i} to {j}\nC: {flow[(i,j)]}"
+            if i<j:
+                if flow[(i,j)] > 0:
+                    edge_labels_2[(i, j)] = f"{i} to {j}\nC: {flow[(i,j)]}"
+
+    # **Filter edges** where `type == 0`
+    filtered_edges = [(u, v) for u, v, d in G_final.edges(data=True) if d['type'] == 0]
+    # **Filter nodes** that are part of the filtered edges
+    filtered_nodes = set([node for edge in filtered_edges for node in edge])
+    # Draw nodes
+    nx.draw_networkx_nodes(G_final, pos, nodelist=filtered_nodes, node_color='lightblue', node_size=100)
+    # Draw normal flows (black)
+    nx.draw_networkx_edges(G_final, pos, edgelist=filtered_edges, edge_color='black', width=2, arrows=True)
+    # Draw edge labels with both normal and rp flows
+    nx.draw_networkx_edge_labels(G_final, pos, edge_labels=edge_labels_1, font_size=5, verticalalignment='top')
+    nx.draw_networkx_edge_labels(G_final, pos, edge_labels=edge_labels_2, font_size=5, verticalalignment='bottom')
+    nx.draw_networkx_labels(G_final, pos, labels={node: node for node in filtered_nodes}, font_size=6, font_color='black')
+    # Show the plot
+    plt.show(block=False)
+
+    ### pedestrian map
+    plt.figure()
+    # **Filter edges** where `type == 0`
+    filtered_edges = [(u, v) for u, v, d in G_final.edges(data=True) if d['type'] == 0]
+    # **Filter nodes** that are part of the filtered edges
+    filtered_nodes = set([node for edge in filtered_edges for node in edge])
+
+    # Draw nodes
+    nx.draw_networkx_nodes(G_final, pos, nodelist=filtered_nodes, node_color='lightblue', node_size=100)
+
+    # Draw normal flows (black)
+    nx.draw_networkx_edges(G_final, pos, edgelist=filtered_edges, edge_color='black', width=2, arrows=True)
+    nx.draw_networkx_labels(G_final, pos, labels={node: node for node in filtered_nodes}, font_size=6, font_color='black')
+    # Draw edge labels with both normal and rp flows
+    nx.draw_networkx_edge_labels(G_final, pos, edge_labels=ped_labels_1, font_size=6, verticalalignment='top')
+    nx.draw_networkx_edge_labels(G_final, pos, edge_labels=ped_labels_2, font_size=6, verticalalignment='bottom')
+    plt.show()
+
     # sol3_LC = A2_LinearComb3(solPart)
     # sol4_LC = A2_LinearComb4(solPart)
 
