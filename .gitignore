@@ -1,4 +1,5 @@
 *.intermodal\results\old
+*.NYC_small/*
 *.NYC20/L4
 *.NYC20/L2
 *.NYC20/L3
