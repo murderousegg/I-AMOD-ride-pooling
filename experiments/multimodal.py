@@ -31,13 +31,18 @@ import networkx as nx
 import re
 import copy
 from gurobipy import *
-netFile, gFile, fcoeffs,_,_ = tnet.get_network_parameters('NYC_small')
+netFile, gFile, fcoeffs,_,_ = tnet.get_network_parameters('NYC_Uber_small')
 
 tNet = tnet.tNet(netFile=netFile, gFile=gFile, fcoeffs=fcoeffs)
 tNetExog = tnet.tNet(netFile=netFile, gFile=gFile, fcoeffs=fcoeffs)
-g_exog = tnet.perturbDemandConstant(tNetExog.g, constant=1.5)
+
+#increase demand
+tNet.set_g(tnet.perturbDemandConstant(tNet.g, constant=0.12))
+
+g_exog = tnet.perturbDemandConstant(tNetExog.g, constant=500)
 tNetExog.set_g(g_exog)
-tNet.build_supergraph()
+
+tNet.build_walking_supergraph()
 og_graph = tNet.G_supergraph.copy()
 #integer demands:
 tNet.g = {key: int(round(value)) for key, value in tNet.g.items()}
@@ -49,19 +54,21 @@ new_origins = {(f"{k[0]}'",f"{k[1]}'"): v for k, v in tNet.g.items()}
 tNet.g = new_origins
 
 #build other layers
-# tNet.build_rp_layer(avg_speed=1000)
 tNet.build_layer(one_way=False, avg_speed=10, symb="b")
 tNet.build_full_layer()
-# tNet.build_pickup_layer()
+pos = nx.nx_agraph.graphviz_layout(tNet.G_supergraph, prog='neato')
 
-# ridepool = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d['type'] == 'rp']
+ridepool = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d['type'] == 'rp']
 pedestrian = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d['type'] == 'p']
 connector = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d['type'] == 'f']
-connector_rp = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d['type'] == 'f_rp']
-
+connector_rp = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d['type'] == 'frp']
 
 node_order = list(tNet.G_supergraph.nodes())
 edge_order = list(tNet.G_supergraph.edges())
+
+car_node_order = list(tNet.G.nodes())
+car_node_index_map = {node: i for i, node in enumerate(tNet.G.nodes())}
+car_edge_order = list(tNet.G.edges())
 
 
 Binc = nx.incidence_matrix(tNet.G_supergraph, nodelist=node_order, edgelist=edge_order, oriented=True)
@@ -79,11 +86,8 @@ for (origin, destination), demand in tNet.g.items():
 #     demand_matrix[ii][ii] = -np.sum(demand_matrix[:][ii]) - demand_matrix[ii][ii]
 
 # loading mat files
-CITY_FOLDER = "NYC_small"
+CITY_FOLDER = "NYC_Uber_small"
 DemandS = demand_matrix             #store demand
-
-# Generating the diagraph
-edgeList = edge_order
 
 # for the main_K_general function
 OriginalDemand= np.array(DemandS)
@@ -117,7 +121,7 @@ def A1_SP():
             if ii==jj:  #special case, set demand to 0 if origin and destination are equal
                 Dems[jj,jj] = -0
             
-            D = nx.shortest_path_length(tNet.G, source=node_order[jj], target=node_order[ii], weight="t_0")            
+            D = nx.shortest_path_length(tNet.G, source=car_node_order[jj], target=car_node_order[ii], weight="t_0") 
             # Store the results in solPart[jj][ii] as a dictionary
             solPart[jj][ii] = {
                 'obj': D,
@@ -153,20 +157,20 @@ def compute_LinearComb2_for_jj1(jj1, N_nodes, DemandS, solPart):
         for ii2 in range(ii1,N_nodes):
             for jj2 in range(jj1,N_nodes):
                 # only calculate when start and ends are not the same
-                if not np.any([node_order[ii2] == node_order[jj2], node_order[ii1] == node_order[jj1],\
-                                node_order[ii1] == node_order[jj2], node_order[ii2] == node_order[jj1],\
-                                      node_order[jj1] == node_order[jj2]]):
+                if not np.any([car_node_order[ii2] == car_node_order[jj2], car_node_order[ii1] == car_node_order[jj1],\
+                                car_node_order[ii1] == car_node_order[jj2], car_node_order[ii2] == car_node_order[jj1],\
+                                      car_node_order[jj1] == car_node_order[jj2]]):
                     # find the minimum cost for combination
-                    opti = np.array([LTIFM2_SP(jj1,ii1,jj2,ii2,solPart, node_order),
-                                     LTIFM2_SP(jj2,ii2,jj1,ii1,solPart, node_order)])
+                    opti = np.array([LTIFM2_SP(jj1,ii1,jj2,ii2,solPart, car_node_order),
+                                     LTIFM2_SP(jj2,ii2,jj1,ii1,solPart, car_node_order)])
                     opti = opti[np.lexsort(opti[:, ::-1].T)]
                     sol2_LC[counter,:] = opti[0,:] # matrix with objective, delays, order
                     counter = counter+1
     sol2_LC = sol2_LC[:counter, :] # trim unused rows
     # remove rows with zero costs and large delays
     sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,0] == 0 ),0)  #cost
-    sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,2] > 5 ),0)  #delay
-    sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,1] > 5 ),0)  #delay
+    sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,2] > 15 ),0)  #delay
+    sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,1] > 15 ),0)  #delay
     #store in .npy file
     np.save(CITY_FOLDER + "/L2/MatL2_" + f"{jj1+1}.npy", sol2_LC)
     return sol2_LC
@@ -234,9 +238,9 @@ def compute_LinearComb3_for_jj1(ii1,jj1, N_nodes, DemandS, solPart):
                     if not np.any([ii1 == jj1, ii1 == jj2, ii1 == jj3, ii2 == jj1, ii2 == jj2, ii2 == jj3,
                             ii3 == jj1, ii3 == jj2, ii3 == jj3, DemandS[ii1, jj1] == 0, DemandS[ii2, jj2] == 0, DemandS[ii3, jj3] == 0]):
                         # find the minimum cost for combination
-                        a = LTIFM3_SP(jj1,ii1,jj2,ii2,jj3,ii3,solPart)
-                        b = LTIFM3_SP(jj2,ii2,jj1,ii1,jj3,ii3,solPart)
-                        c = LTIFM3_SP(jj3,ii3,jj2,ii2,jj1,ii1,solPart)
+                        a = LTIFM3_SP(jj1,ii1,jj2,ii2,jj3,ii3,solPart,car_node_order)
+                        b = LTIFM3_SP(jj2,ii2,jj1,ii1,jj3,ii3,solPart,car_node_order)
+                        c = LTIFM3_SP(jj3,ii3,jj2,ii2,jj1,ii1,solPart,car_node_order)
                         opti = np.array([a,b,c])
                         opti = opti[np.lexsort(opti[:, ::-1].T)]
                         sol3_LC[counter,:] = opti[0,:] # matrix with objective, delays, order
@@ -386,10 +390,10 @@ def A2_LinearComb4(solPart):
 def Generate_Full_List(ppl):
     if ppl == 2:
         sol2_LC =np.load(f'{CITY_FOLDER}/MatL2.npy')
-        # sol2_LC[:, 0] /= 2  # Divide first column by 2
+        sol2_LC[:, 0] /= 2  # Divide first column by 2
         size2 = sol2_LC.shape[0]
         # Create Sol2 with NaN padding similar to MATLAB's code
-        sol2_LC[:, 3:7] -= 1    #subtract 1 from the indexing
+        # sol2_LC[:, 3:7] -= 1    #subtract 1 from the indexing
         Sol2 = np.hstack([
             sol2_LC[:, :3],
             np.full((size2, 2), np.nan),
@@ -405,10 +409,10 @@ def Generate_Full_List(ppl):
     elif ppl ==3:
         # Load MatL2.mat and MatL3.mat
         sol2_LC =np.load(f'{CITY_FOLDER}/MatL2.npy')
-        sol2_LC[:, 3:7] -= 1    #subtract 1 from the indexing
+        # sol2_LC[:, 3:7] -= 1    #subtract 1 from the indexing
         
         sol3_LC =np.load(f'{CITY_FOLDER}/MatL3.npy')
-        sol3_LC[:, 4:10] -= 1    #subtract 1 from the indexing
+        # sol3_LC[:, 4:10] -= 1    #subtract 1 from the indexing
         
         # Process sol2_LC
         sol2_LC[:, 0] /= 2
@@ -479,129 +483,185 @@ def Generate_Full_List(ppl):
 
     else:
         raise ValueError("ppl should be 2, 3, or 4")
+
     FullList = FullList[FullList[:, 0].argsort()]
-
+    
     # Iterate through each row of FullList
-    for iiii in range(FullList.shape[0]):
-        vect = np.transpose(FullList[iiii, 5:13])  # Adjusted for 0-based indexing
-        vectR = vect[~np.isnan(vect)]  # Remove NaN values
-        vectR = vectR.reshape(-1, 2)
-        num = vectR.shape[0]
+    # for iiii in range(FullList.shape[0]):
+    #     vect = np.transpose(FullList[iiii, 5:13])  # Adjusted for 0-based indexing
+    #     vectR = vect[~np.isnan(vect)]  # Remove NaN values
+    #     vectR = vectR.reshape(-1, 2)
+    #     num = vectR.shape[0]
         # Check demand condition and modify FullList if necessary
-        for iii in range(num):
-            if DemandS[int(vectR[iii][1])][int(vectR[iii][0])] == 0:  # DemandS index adjusted for 0-based
-                FullList[iiii, 0] = 0  # Set the first column to 0
+        # for iii in range(num):
+        #     if DemandS[car_node_index_map[int(vectR[iii][0])]][car_node_index_map[int(vectR[iii][1])]] == 0:  # DemandS index adjusted for 0-based
+        #         FullList[iiii, 0] = 0  # Set the first column to 0
     FullList = FullList[FullList[:, 0] < -0.01]
-    FullList[:, 0] /= ppl
-
+    # FullList[:, 0] /= ppl
     return FullList
 
-def create_pickup_dropoff_list(sol_LC):
-    rp_list = []
-    edge_list = []
-    for i in range(sol_LC.shape[0]):
-        node_idx = sol_LC[i,3:7]
-        order_idx = sol_LC[i,7:11]
-        part_1 = node_idx[order_idx == 1]
-        part_2 = node_idx[order_idx == 2]
-        edge_list.append([part_1,part_2])
-        edge_1=0
-        edge_2=0
-        for j in range(len(edge_order)):
-            if edge_order[j] == (str(int(part_1[0]))+"q",str(int(part_1[1])) + "q"):
-                edge_1 = j
-            elif edge_order[j] == (str(int(part_2[0]))+"q", str(int(part_2[1])) + "q"):
-                edge_2 = j
-        rp_list.append([edge_1,edge_2])
-    rp_list_np = np.asarray(rp_list)
-    np.save("rp_list.npy", rp_list_np)
-    np.save("rp_edge_list.npy", edge_list)
-    return rp_list
+def compute_results(ppl, FullList, Delay, WaitingTime, Demand, fcoeffs):
+    TotGamma2 = 0
+    TotGamma3 = 0
+    TotGamma4 = 0
+    Cumul_delay2 = 0
+    Cumul_delay3 = 0
+    Cumul_delay4 = 0
+    OriginalDemand = Demand.copy()
+    DemandS =  Demand.copy()
+    Demands_rp = np.zeros([N_nodes_road,N_nodes_road])
+    print(Delay)
+    print(WaitingTime)
+    for iii in range(FullList.shape[0]):
+        # Seperate function to remove clutter
+        Cumul_delay2, TotGamma2, Cumul_delay3, TotGamma3, Cumul_delay4, TotGamma4, DemandS, Demands_rp =\
+              calculate_gamma(FullList,DemandS, Delay, N_nodes_road, WaitingTime, Cumul_delay2, TotGamma2, Cumul_delay3, TotGamma3, Cumul_delay4, TotGamma4, iii, Demands_rp, car_node_index_map)
+    
+    Demands_rp = Demands_rp - np.diag(np.diag(Demands_rp))
+    #calculate solution
+    solBase =LTIFM_reb(OriginalDemand,tNet.G, fcoeffs=fcoeffs)
+    solNP = LTIFM_reb(DemandS,tNet.G, fcoeffs=fcoeffs)
+    solRP = LTIFM_reb(Demands_rp,tNet.G, fcoeffs=fcoeffs)
 
-def create_directional_list(sol_LC):
-    """
-    Creates a list with all possible sequences in sol_LC
-    TODO: implement similar to generate_Full_List
-    """
-    lst = []
-    for i in range(sol_LC.shape[0]):
-        lst.append(sol_LC[i,3:7])
-    return lst
+    #reset diagonals (these are modified in LTIFM_reb)
+    DemandS = DemandS - np.diag(np.diag(DemandS))   
+    Demands_rp = Demands_rp - np.diag(np.diag(Demands_rp))
+    TrackDems_temp = [np.sum(OriginalDemand), np.sum(DemandS),np.sum(Demands_rp)]
+    TotGamma = [TotGamma2, TotGamma3,TotGamma4]
+    Cumul_delay = [Cumul_delay2, Cumul_delay3, Cumul_delay4]
+    #Prepare for storing
+    solutions_data = {
+        "x": np.stack([solBase["x"], solNP["x"], solRP["x"]], axis=0),           # Shape: (3, N_edges * N_nodes)
+        "xr": np.stack([solBase["xr"], solNP["xr"], solRP["xr"]], axis=0),       # Shape: (3, N_edges)
+        "IndividualTimes": np.stack([solBase["IndividualTimes"], solNP["IndividualTimes"], solRP["IndividualTimes"]], axis=0),  # Shape: (3, N_nodes)
+        "obj": np.array([solBase["obj"], solNP["obj"], solRP["obj"]]),           # Shape: (3,)
+        "Dem": np.stack([solBase["Dem"], solNP["Dem"], solRP["Dem"]], axis=0)  # Shape: (3, 24, 24)
+        }
+    # Additional tracking variables
+    additional_data = {
+        "TrackDems_temp": TrackDems_temp,
+        "Cumul_delay": Cumul_delay,
+        "TotGamma": TotGamma
+    }
+    # Save to an HDF5 file
+    with h5py.File(f"{CITY_FOLDER}/Results/Delay{Delay}WTime{WaitingTime}.h5", "w") as h5file:
+        # Save solution arrays in a flat structure
+        for key, value in solutions_data.items():
+            h5file.create_dataset(f"solutions/{key}", data=value)
+        
+        # Save additional tracking variables
+        for key, value in additional_data.items():
+            h5file.create_dataset(f"additional/{key}", data=value)
+    return solRP["x"], solRP["xr"], TrackDems_temp, TotGamma
 
-def create_rp_demand(sol_LC):
-    """
-    Creates the demand matrix as a linear combination of indices
-    corresponding to the selected sequences.
-    """
-    #get list of sequences
-    lst = create_directional_list(sol_LC)
-    #initialize empty array of with objects
-    D_rp = np.empty((N_nodes_road, N_nodes_road), dtype=object)
-
-    # Initialize each element with an empty list
-    for i in range(D_rp.shape[0]):
-        for j in range(D_rp.shape[1]):
-            D_rp[i, j] = []
-    # fill elements with list of tours belonging to said demand
-    for i, tour in enumerate(lst):
-        if tour[0] != tour[1]:  # skip if same origin
-            D_rp[node_index_map[int(tour[0])], node_index_map[int(tour[1])]].append(i)
-            D_rp[node_index_map[int(tour[0])], node_index_map[int(tour[0])]].append(i)# -outgoing demand
-
-        D_rp[node_index_map[int(tour[1])], node_index_map[int(tour[2])]].append(i)
-        D_rp[node_index_map[int(tour[1])], node_index_map[int(tour[1])]].append(i) # -outgoing demand
-
-        if tour[2] != tour[3]: #skip if same destination
-            D_rp[node_index_map[int(tour[2])], node_index_map[int(tour[3])]].append(i)
-            D_rp[node_index_map[int(tour[2])], node_index_map[int(tour[2])]].append(i) # -outgoing demand
-    return D_rp
 
 def main():
     # create costs matrix
     solPart = A1_SP()
-
     # ### create solutions for different amount of linear combinations
-    sol2_LC = A2_LinearComb2(solPart)
-    rp_list = create_pickup_dropoff_list(sol2_LC)
-    D_rp = create_rp_demand(sol2_LC)
-    # rp_list = create_directional_list(sol2_LC)
-    # rp_list_np = np.load("rp_list.npy")
-    # rp_list = rp_list_np
-    cost_1 = []
-    cost_2 = []
-    for i in range(sol2_LC.shape[0]):
-        arc_1 = rp_list[i][0]
-        arc_2 = rp_list[i][1]
-        cost_1.append(solPart[node_index_map[int(edge_order[arc_1][0][:-1])]][node_index_map[int(edge_order[arc_1][1][:-1])]]["obj"] - sol2_LC[i,1])
-        cost_2.append(solPart[node_index_map[int(edge_order[arc_2][0][:-1])]][node_index_map[int(edge_order[arc_2][1][:-1])]]["obj"] - sol2_LC[i,2])
-    sol_cost = np.array([-sol2_LC[:,0], cost_1, cost_2])
+    # sol2_LC = A2_LinearComb2(solPart)
+    # sol3_LC = A2_LinearComb3(solPart)
 
-    beta_lim = np.ones((len(rp_list), 2))
-    beta_lim[:, 0] = 0  
-    beta_lim[:, 1] = GRB.INFINITY  
+    FullList = Generate_Full_List(2)
+    tot_rp_flow = []
+    tot_frp_flow = []
+    tot_ped_flow = []
+    tot_b_flow = []
+    single_ride = []
+    double_ride = []
+    triple_ride = []
+    max_iter = 10
+    for i in range(max_iter):
+        x_rp_mat = cars.solve_matrix_base(tnet=tNet,fcoeffs=fcoeffs, times=i)
+        # find D_rp, match edges to nodes in tNet.G
+        D_rp = np.zeros((N_nodes_road, N_nodes_road))
+        for count, (u,v) in enumerate(ridepool):
+            D_rp[car_node_index_map[int(v[:-2])], car_node_index_map[int(u[:-2])]] = sum(x_rp_mat[count])
+        print(f"ridepooling demand: {D_rp.sum()}")
+        x, xr, TrackDems, TotG = compute_results(2, FullList=FullList, Delay=10, WaitingTime=10, Demand=D_rp, fcoeffs=fcoeffs)
 
-    fixed_indices = []
-    for i in range(10):
-        selected_tours, tour_count = cars.solve_cars_matrix_rp_reduced(tNet,fcoeffs=fcoeffs, rebalancing=False, rp_list=rp_list, sol_costs=sol_cost, D_rp=D_rp, beta_lim=beta_lim)
+        for i in range(N_edges_road):
+            u, v = list(tNet.G.edges())[i]
+            t0 = tNet.G[u][v]['t_0']
+            capacity = tNet.G[u][v]['capacity']
+
+            # Get flow on arc (u,v)
+            flow_ij = sum([x[i, j] for j in range(N_nodes_road)]) + xr[i]
+            # Compute congestion ratio
+            ratio = flow_ij / (capacity)
+
+            # Apply BPR function
+            adjusted_tij = t0 * (1 + 0.15 * ratio**4)
+            tNet.G[u][v]['t_1'] = adjusted_tij
         
-        filtered_tours = np.delete(tour_count,fixed_indices)
-        top_tours = np.argsort(filtered_tours)[-3:]
-        Pt = np.zeros((len(tour_count)))
-        for j, i in enumerate(tour_count):
-            Pt[j] = probcombN([i, i],5)
-        beta_lim[top_tours,1] = Pt[top_tours]*tour_count[top_tours]
-        beta_lim[top_tours,0] = Pt[top_tours]*tour_count[top_tours]
-        fixed_indices.append(top_tours.tolist())
-    
-    G_final = tNet.G_supergraph
+        
+        for u,v,d in tNet.G_supergraph.edges(data=True):
+            if d['type'] == 'rp':
+                #### maybe don't recalculate shortest path based on t_1?
+                ### cuz that just incentivices everyone going around the fastest path
+                ### should do shortest path with t_0, but keep t_1 time?
+                tNet.G_supergraph[u][v]['t_1'] = nx.shortest_path_length(tNet.G, source=int(u[:-2]), target=int(v[:-2]), weight='t_1')
+            else:
+                tNet.G_supergraph[u][v]['t_1'] = tNet.G_supergraph[u][v]['t_0']
+        
+        rp_flow = {(i,j): tNet.G_supergraph[i][j]['flow'] for i,j in tNet.G_supergraph.edges() if tNet.G_supergraph[i][j]['type']=='rp'}  # 'rp' flow
+        frp_flow = {(i,j): tNet.G_supergraph[i][j]['flow'] for i,j in tNet.G_supergraph.edges() if tNet.G_supergraph[i][j]['type']=='frp'}  # 'rp' flow
+        ped_flow = {(i,j): tNet.G_supergraph[i][j]['flow'] for i,j in tNet.G_supergraph.edges() if tNet.G_supergraph[i][j]['type']=='p'}
+        b_flow = {(i,j): tNet.G_supergraph[i][j]['flow'] for i,j in tNet.G_supergraph.edges() if tNet.G_supergraph[i][j]['type']=='b'}
+        
+        # this_rp_flow = [rp_flow[i] * tNet.G_supergraph[i[0]][i[1]]['t_1'] for i in rp_flow.keys()]
+        this_rp_flow = [rp_flow[i] * tNet.G_supergraph[i[0]][i[1]]['t_1'] for i in rp_flow.keys()]
+        this_rp_flow = sum(this_rp_flow)
+        tot_rp_flow.append(this_rp_flow)
+        
+        this_frp_flow = [frp_flow[i] * tNet.G_supergraph[i[0]][i[1]]['t_1'] for i in frp_flow.keys()]
+        this_frp_flow = sum(this_frp_flow)
+        tot_frp_flow.append(this_frp_flow)
 
-    real_tours = []
-    for i in selected_tours:
-        sub_tours = []
-        for j in i:
-            sub_tours.append(edge_order[j])
-        real_tours.append(sub_tours)
-    print(f"real_tours: {real_tours}")
+        # this_ped_flow = [ped_flow[i] * tNet.G_supergraph[i[0]][i[1]]['t_1'] for i in ped_flow.keys()]
+        this_ped_flow = [ped_flow[i] * tNet.G_supergraph[i[0]][i[1]]['t_1'] for i in ped_flow.keys()]
+        this_ped_flow = sum(this_ped_flow)
+        tot_ped_flow.append(this_ped_flow)
+
+        # this_b_flow = [b_flow[i] * tNet.G_supergraph[i[0]][i[1]]['t_1'] for i in b_flow.keys()]
+        this_b_flow = [b_flow[i] * tNet.G_supergraph[i[0]][i[1]]['t_1'] for i in b_flow.keys()]
+        this_b_flow = sum(this_b_flow)
+        tot_b_flow.append(this_b_flow)
+
+        PercNRP = TrackDems[1]/(TrackDems[2] + TrackDems[1])
+        # Normalize TotG row-wise and scale it by (1 - PercNRP)
+        TotG_normalized = TotG / np.sum(TotG, axis=0, keepdims=True)  # Normalize rows of TotG
+        scaled_TotG = TotG_normalized * (1 - PercNRP)  # Scale by (1 - PercNRP)
+        # Combine PercNRP and the scaled TotG into a new array
+        total_PercNRP = np.hstack([PercNRP, scaled_TotG])
+        single_ride.append(total_PercNRP[0])
+        double_ride.append(total_PercNRP[1])
+        triple_ride.append(total_PercNRP[2])
+    print(tot_rp_flow)
+    print(tot_frp_flow)
+    print(tot_ped_flow)
+    print(tot_b_flow)
+    # Create bar plot
+    plt.bar(np.arange(max_iter), [tot_rp_flow[i] * single_ride[i] for i in range(len(tot_rp_flow))], label='rp flow 1 user')
+    plt.bar(np.arange(max_iter), [tot_rp_flow[i] * double_ride[i] for i in range(len(tot_rp_flow))], bottom=[tot_rp_flow[i] * single_ride[i] for i in range(len(tot_rp_flow))], label='rp flow 2 users')
+    plt.bar(np.arange(max_iter), [tot_rp_flow[i] * triple_ride[i] for i in range(len(tot_rp_flow))], bottom=[tot_rp_flow[i] * (single_ride[i]+ double_ride[i]) for i in range(len(tot_rp_flow))], label='rp flow 3 users')
+    plt.bar(np.arange(max_iter), tot_ped_flow, bottom=tot_rp_flow, label='ped flow')
+    plt.bar(np.arange(max_iter), tot_b_flow, bottom=np.array(tot_rp_flow) + np.array(tot_ped_flow), label='bike flow')
+
+    # Customize plot
+    plt.xlabel('Iteration')
+    plt.ylabel('Total time spent in mode of transport')
+    plt.title('Evolution of mode allocation over time')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+    print(x_rp_mat)
+    print(x_rp_mat.shape)
+    print(np.nonzero(x_rp_mat))
+
+    G_final = tNet.G_supergraph
         
 
     # Extract edge labels (flow values)
@@ -617,16 +677,13 @@ def main():
     rp_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='rp'}  # 'rp' flow
     ped_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='p'}
     b_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='b'}
-    q_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='q' if G_final[i][j]['flow'] != 0}
-    qf_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'fq' if G_final[i][j]['flow'] != 0} 
     f_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'f'}
-    frp_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'f_rp'}
+    frp_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'frp'}
     fu_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'u'}
     print(f"f: {sum(f_flow.values())/2}")
     print(f"frp: {sum(frp_flow.values())/2}")
     print(f"fu: {sum(fu_flow.values())/2}")
-    print(f"q flow: {q_flow}")
-    print(f"qf flow: {qf_flow}")
+
 
     ped_labels_1 = {}
     ped_labels_2 = {}
@@ -651,23 +708,23 @@ def main():
 
 
     for i,j,t in G_final.edges(data=True):
-        if t['type'] ==0:
+        if t['type'] == 'rp':
             # Create label with both flow values (if applicable)
             if i>j:
-                if flow[(i,j)] > 0:
-                    edge_labels_1[(i, j)] = f"{i} to {j}\nC: {flow[(i,j)]}"
+                if t['flow'] > 0:
+                    edge_labels_1[(i, j)] = f"{i} to {j}\nC: {t['flow']}"
             if i<j:
-                if flow[(i,j)] > 0:
-                    edge_labels_2[(i, j)] = f"{i} to {j}\nC: {flow[(i,j)]}"
+                if t['flow'] > 0:
+                    edge_labels_2[(i, j)] = f"{i} to {j}\nC: {t['flow']}"
 
     # **Filter edges** where `type == 0`
-    filtered_edges = [(u, v) for u, v, d in G_final.edges(data=True) if d['type'] == 0]
+    filtered_edges = [(u, v) for u, v, d in G_final.edges(data=True) if d['type'] == "rp" and d['flow']>0]
     # **Filter nodes** that are part of the filtered edges
     filtered_nodes = set([node for edge in filtered_edges for node in edge])
     # Draw nodes
-    nx.draw_networkx_nodes(G_final, pos, nodelist=filtered_nodes, node_color='lightblue', node_size=100)
+    nx.draw_networkx_nodes(G_final, pos, nodelist=filtered_nodes, node_color='lightblue', node_size=10)
     # Draw normal flows (black)
-    nx.draw_networkx_edges(G_final, pos, edgelist=filtered_edges, edge_color='black', width=2, arrows=True)
+    nx.draw_networkx_edges(G_final, pos, edgelist=filtered_edges, edge_color='black', width=0.2, arrows=True)
     # Draw edge labels with both normal and rp flows
     nx.draw_networkx_edge_labels(G_final, pos, edge_labels=edge_labels_1, font_size=5, verticalalignment='top')
     nx.draw_networkx_edge_labels(G_final, pos, edge_labels=edge_labels_2, font_size=5, verticalalignment='bottom')
@@ -692,6 +749,10 @@ def main():
     nx.draw_networkx_edge_labels(G_final, pos, edge_labels=ped_labels_1, font_size=6, verticalalignment='top')
     nx.draw_networkx_edge_labels(G_final, pos, edge_labels=ped_labels_2, font_size=6, verticalalignment='bottom')
     plt.show()
+    # rp_list = create_directional_list(sol2_LC)
+    # rp_list_np = np.load("rp_list.npy")
+    # rp_list = rp_list_np
+    
 
     # sol3_LC = A2_LinearComb3(solPart)
     # sol4_LC = A2_LinearComb4(solPart)
@@ -715,3 +776,132 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+"""
+cost_1 = []
+cost_2 = []
+for i in range(sol2_LC.shape[0]):
+    arc_1 = rp_list[i][0]
+    arc_2 = rp_list[i][1]
+    cost_1.append(solPart[node_index_map[int(edge_order[arc_1][0][:-1])]][node_index_map[int(edge_order[arc_1][1][:-1])]]["obj"] - sol2_LC[i,1])
+    cost_2.append(solPart[node_index_map[int(edge_order[arc_2][0][:-1])]][node_index_map[int(edge_order[arc_2][1][:-1])]]["obj"] - sol2_LC[i,2])
+sol_cost = np.array([-sol2_LC[:,0], cost_1, cost_2])
+
+beta_lim = np.ones((len(rp_list), 2))
+beta_lim[:, 0] = 0  
+beta_lim[:, 1] = GRB.INFINITY  
+
+fixed_indices = []
+for i in range(10):
+    selected_tours, tour_count = cars.solve_cars_matrix_rp_reduced(tNet,fcoeffs=fcoeffs, rebalancing=False, rp_list=rp_list, sol_costs=sol_cost, D_rp=D_rp, beta_lim=beta_lim)
+    
+    filtered_tours = np.delete(tour_count,fixed_indices)
+    top_tours = np.argsort(filtered_tours)[-3:]
+    Pt = np.zeros((len(tour_count)))
+    for j, i in enumerate(tour_count):
+        Pt[j] = probcombN([i, i],5)
+    beta_lim[top_tours,1] = Pt[top_tours]*tour_count[top_tours]
+    beta_lim[top_tours,0] = Pt[top_tours]*tour_count[top_tours]
+    fixed_indices.append(top_tours.tolist())
+
+G_final = tNet.G_supergraph
+
+real_tours = []
+for i in selected_tours:
+    sub_tours = []
+    for j in i:
+        sub_tours.append(edge_order[j])
+    real_tours.append(sub_tours)
+print(f"real_tours: {real_tours}")
+    
+
+# Extract edge labels (flow values)
+for u, v in G_final.edges():
+    G_final[u][v]['flow'] = round(G_final[u][v]['flow'])
+
+normal_edges = []
+rp_edges = []
+edge_labels_1 = {}
+edge_labels_2 = {}
+
+flow = {(i,j):G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']==0}  # car flow
+rp_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='rp'}  # 'rp' flow
+ped_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='p'}
+b_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='b'}
+q_flow = {(int(re.search(r'\d+', i).group()),int(re.search(r'\d+', j).group())): G_final[i][j]['flow'] for i,j in G_final.edges() if G_final[i][j]['type']=='q' if G_final[i][j]['flow'] != 0}
+qf_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'fq' if G_final[i][j]['flow'] != 0} 
+f_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'f'}
+frp_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'f_rp'}
+fu_flow = {(i,j): G_final[i][j]['flow'] for i,j,d in G_final.edges(data=True) if d['type'] == 'u'}
+print(f"f: {sum(f_flow.values())/2}")
+print(f"frp: {sum(frp_flow.values())/2}")
+print(f"fu: {sum(fu_flow.values())/2}")
+print(f"q flow: {q_flow}")
+print(f"qf flow: {qf_flow}")
+
+ped_labels_1 = {}
+ped_labels_2 = {}
+for i,j,t in G_final.edges(data=True):
+    if t['type'] == 0:
+        if i>j:
+            if ped_flow[(i,j)] > 0 and b_flow[(i,j)] > 0:
+                ped_labels_1[(i,j)] = f"{i} to {j}\nP: {ped_flow[(i,j)]}\nb: {b_flow[(i,j)]}"
+            elif ped_flow[(i,j)] > 0:
+                ped_labels_1[(i,j)] = f"{i} to {j}\nP: {ped_flow[(i,j)]}"
+            elif b_flow[(i,j)] > 0:
+                ped_labels_1[(i,j)] = f"{i} to {j}\nb: {b_flow[(i,j)]}"
+                
+        if i<j:
+            if ped_flow[(i,j)] > 0 and b_flow[(i,j)] > 0:
+                ped_labels_2[(i,j)] = f"{i} to {j}\nP: {ped_flow[(i,j)]}\nb: {b_flow[(i,j)]}"
+            elif ped_flow[(i,j)] > 0:
+                ped_labels_2[(i,j)] = f"{i} to {j}\nP: {ped_flow[(i,j)]}"
+            elif b_flow[(i,j)] > 0:
+                ped_labels_2[(i,j)] = f"{i} to {j}\nb: {b_flow[(i,j)]}"
+                
+
+
+for i,j,t in G_final.edges(data=True):
+    if t['type'] ==0:
+        # Create label with both flow values (if applicable)
+        if i>j:
+            if flow[(i,j)] > 0:
+                edge_labels_1[(i, j)] = f"{i} to {j}\nC: {flow[(i,j)]}"
+        if i<j:
+            if flow[(i,j)] > 0:
+                edge_labels_2[(i, j)] = f"{i} to {j}\nC: {flow[(i,j)]}"
+
+# **Filter edges** where `type == 0`
+filtered_edges = [(u, v) for u, v, d in G_final.edges(data=True) if d['type'] == 0]
+# **Filter nodes** that are part of the filtered edges
+filtered_nodes = set([node for edge in filtered_edges for node in edge])
+# Draw nodes
+nx.draw_networkx_nodes(G_final, pos, nodelist=filtered_nodes, node_color='lightblue', node_size=100)
+# Draw normal flows (black)
+nx.draw_networkx_edges(G_final, pos, edgelist=filtered_edges, edge_color='black', width=2, arrows=True)
+# Draw edge labels with both normal and rp flows
+nx.draw_networkx_edge_labels(G_final, pos, edge_labels=edge_labels_1, font_size=5, verticalalignment='top')
+nx.draw_networkx_edge_labels(G_final, pos, edge_labels=edge_labels_2, font_size=5, verticalalignment='bottom')
+nx.draw_networkx_labels(G_final, pos, labels={node: node for node in filtered_nodes}, font_size=6, font_color='black')
+# Show the plot
+plt.show(block=False)
+
+### pedestrian map
+plt.figure()
+# **Filter edges** where `type == 0`
+filtered_edges = [(u, v) for u, v, d in G_final.edges(data=True) if d['type'] == 0]
+# **Filter nodes** that are part of the filtered edges
+filtered_nodes = set([node for edge in filtered_edges for node in edge])
+
+# Draw nodes
+nx.draw_networkx_nodes(G_final, pos, nodelist=filtered_nodes, node_color='lightblue', node_size=100)
+
+# Draw normal flows (black)
+nx.draw_networkx_edges(G_final, pos, edgelist=filtered_edges, edge_color='black', width=2, arrows=True)
+nx.draw_networkx_labels(G_final, pos, labels={node: node for node in filtered_nodes}, font_size=6, font_color='black')
+# Draw edge labels with both normal and rp flows
+nx.draw_networkx_edge_labels(G_final, pos, edge_labels=ped_labels_1, font_size=6, verticalalignment='top')
+nx.draw_networkx_edge_labels(G_final, pos, edge_labels=ped_labels_2, font_size=6, verticalalignment='bottom')
+plt.show()
+"""

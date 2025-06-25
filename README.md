@@ -7,7 +7,12 @@ As of 20-12, the code is yet to be combined. The ride-pooling approach, which wa
 
 ## Intermodal Mobility on Demand
 The code from [Wollenstein-betech et al., 2021] is currently copied into /intermodal/. To run an expirement, a command needs to be entered into the console:
-`python3 -m intermoda.experiments.{name of the file without extension}`
+`python3 -m experiments.{name of the file without extension}`
 Note that there are many different types of experiments listed in the expiriments folder. In the future, only the necessary parts of the code will be reused. Additionally, all of data used in that paper are in a different structure than the data from [Paparella et al.]. To solve this issue, the code still needs to be modified to some extend in order to accept the new formatting. 
 
 Requirements: gurobipy, networkx, scipy, numpy, pwlf, joblib, h5py
+
+# Main functionality
+The main expiriment can be run by using
+`python3 -m experiments.ride-pooling`
+First, a network is definied similar to the networks described by [Wollenstein-betech et al., 2021]. Along with the normal modes of transport (walking, public transport, cars), a ride-pooling layer is created. Then, all spatially feasible bags/sequences using the algorithm proposed by [Paparella et al., 2024] are computed for the ride-pooling layer. Each sequence corresponds to a selection variable in the optimization problem, and a demand matrix can be created as a linear combination of all sequences (that are selected). 

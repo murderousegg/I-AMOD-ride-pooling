@@ -32,9 +32,8 @@ connector_rp = [(u, v) for (u, v, d) in tNet.G_supergraph.edges(data=True) if d[
 
 totalCost = []
 if __name__ == '__main__':
-    for i in range(1):
-        cars.solve_cars_matrix(tNet,fcoeffs=fcoeffs, rebalancing=False)
-        G_final = tNet.G_supergraph
+    cars.solve_cars_matrix(tNet,fcoeffs=fcoeffs, rebalancing=False)
+    G_final = tNet.G_supergraph
     
     # Extract edge labels (flow values)
     for u, v in G_final.edges():

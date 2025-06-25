@@ -1,5 +1,5 @@
 import numpy as np
-def LTIFM3_SP(jj1,ii1,jj2,ii2,jj3,ii3,solPart):
+def LTIFM3_SP(jj1,ii1,jj2,ii2,jj3,ii3,solPart,node_order):
 
     objNP = solPart[jj1][ii1]["obj"] + solPart[jj2][ii2]["obj"] + solPart[jj3][ii3]["obj"]
     sol123 = {}
@@ -54,7 +54,8 @@ def LTIFM3_SP(jj1,ii1,jj2,ii2,jj3,ii3,solPart):
     min_value = min(Part)
     bb = Part.index(min_value)
 
-    iterators = [jj1+1, ii1+1, jj2+1, ii2+1, jj3+1, ii3+1]
+    # iterators = [jj1+1, ii1+1, jj2+1, ii2+1, jj3+1, ii3+1]
+    iterators = [node_order[jj1], node_order[ii1], node_order[jj2], node_order[ii2], node_order[jj3], node_order[ii3]]
     if bb==0:
         sol = [sol123["obj"]]
         sol.extend(sol123["Delay"])

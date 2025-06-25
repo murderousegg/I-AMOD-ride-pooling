@@ -1,15 +1,15 @@
 import numpy as np
 from Utilities.RidePooling.probcomb import probcombN
-def calculate_gamma(FullList, DemandS, Delay, N_nodes, WaitingTime, Cumul_delay2, TotGamma2, Cumul_delay3, TotGamma3, Cumul_delay4, TotGamma4, iii, Demands_rp):
-    if np.isnan(FullList[iii][3]) and np.isnan(FullList[iii][4]) and FullList[iii][1] < Delay and FullList[iii][2] < Delay and DemandS[int(FullList[iii][6])][int(FullList[iii][5])] >= 10e-5 and DemandS[int(FullList[iii][8])][int(FullList[iii][7])] >= 10e-5:
-        jj1 = int(FullList[iii][5])
-        ii1 = int(FullList[iii][6])
-        jj2 = int(FullList[iii][7])
-        ii2 = int(FullList[iii][8])
-        # if iii == 13:
-        #     dafs
-        gamma = min([DemandS[ii1][jj1], DemandS[ii2][jj2]])*probcombN([DemandS[ii1][jj1],DemandS[ii2][jj2]],WaitingTime)/2
-        # print(gamma)
+def calculate_gamma(FullList, DemandS, Delay, N_nodes, WaitingTime, Cumul_delay2, TotGamma2, Cumul_delay3, TotGamma3, Cumul_delay4, TotGamma4, iii, Demands_rp, idx_map):
+    gamma = 0
+    if np.isnan(FullList[iii][3]) and np.isnan(FullList[iii][4]) and FullList[iii][1] < Delay and FullList[iii][2] < Delay and DemandS[idx_map[int(FullList[iii][6])]][idx_map[int(FullList[iii][5])]] >= 10e-5 and DemandS[idx_map[int(FullList[iii][8])]][idx_map[int(FullList[iii][7])]] >= 10e-5:
+        jj1 = idx_map[int(FullList[iii][5])]
+        ii1 = idx_map[int(FullList[iii][6])]
+        jj2 = idx_map[int(FullList[iii][7])]
+        ii2 = idx_map[int(FullList[iii][8])]
+
+        prob = probcombN([DemandS[ii1][jj1],DemandS[ii2][jj2]],WaitingTime)
+        gamma = min([DemandS[ii1][jj1], DemandS[ii2][jj2]])*prob/2
         Gamma0 = np.zeros([N_nodes,N_nodes])
         if np.array_equal(FullList[iii][13:17], [1, 2, 1, 2]):
             Gamma0[jj2][jj1] = 1
@@ -33,13 +33,14 @@ def calculate_gamma(FullList, DemandS, Delay, N_nodes, WaitingTime, Cumul_delay2
         TotGamma2 += multip*gamma
         # print(TotGamma2)
     
-    elif ~np.isnan(FullList[iii][3]) and np.isnan(FullList[iii][4]) and FullList[iii][3] < Delay and FullList[iii][1] < Delay and FullList[iii][2] < Delay and DemandS[int(FullList[iii][6])][int(FullList[iii][5])] >= 10e-5 and DemandS[int(FullList[iii][8])][int(FullList[iii][7])] >= 10e-5 and DemandS[int(FullList[iii][10])][int(FullList[iii][9])]>= 10e-5:
-        jj1 = int(FullList[iii][5])
-        ii1 = int(FullList[iii][6])
-        jj2 = int(FullList[iii][7])
-        ii2 = int(FullList[iii][8])
-        jj3 = int(FullList[iii][9])
-        ii3 = int(FullList[iii][10])
+    elif ~np.isnan(FullList[iii][3]) and np.isnan(FullList[iii][4]) and FullList[iii][3] < Delay and FullList[iii][1] < Delay and FullList[iii][2] < Delay and DemandS[idx_map[int(FullList[iii][6])]][idx_map[int(FullList[iii][5])]] >= 10e-5 and DemandS[idx_map[int(FullList[iii][8])]][idx_map[int(FullList[iii][7])]] >= 10e-5 and DemandS[idx_map[int(FullList[iii][10])]][idx_map[int(FullList[iii][9])]]>= 10e-5:
+        jj1 = idx_map[int(FullList[iii][5])]
+        ii1 = idx_map[int(FullList[iii][6])]
+        jj2 = idx_map[int(FullList[iii][7])]
+        ii2 = idx_map[int(FullList[iii][8])]
+        jj3 = idx_map[int(FullList[iii][9])]
+        ii3 = idx_map[int(FullList[iii][10])]
+
         gamma = min([DemandS[ii1][jj1],DemandS[ii2][jj2],DemandS[ii3][jj3]])*probcombN([DemandS[ii1][jj1],DemandS[ii2][jj2],DemandS[ii3][jj3]],WaitingTime)/3
         Gamma0 = np.zeros([N_nodes,N_nodes])
         
@@ -326,4 +327,4 @@ def calculate_gamma(FullList, DemandS, Delay, N_nodes, WaitingTime, Cumul_delay2
         # Update TotGamma4 by adding gamma
         TotGamma4 += gamma
 
-    return Cumul_delay2, TotGamma2, Cumul_delay3, TotGamma3, Cumul_delay4, TotGamma4, DemandS, Demands_rp
+    return Cumul_delay2, TotGamma2, Cumul_delay3, TotGamma3, Cumul_delay4, TotGamma4, DemandS, Demands_rp, gamma

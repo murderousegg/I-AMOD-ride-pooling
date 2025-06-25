@@ -1,6 +1,6 @@
 import numpy as np
 def probcombN(a, waiting):
-    waiting = waiting/60
+    waiting = waiting
     n = len(a)
     prob = 0
     if np.any(a==0):

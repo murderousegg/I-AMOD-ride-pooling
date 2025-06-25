@@ -7,14 +7,14 @@ def LTIFM2_SP(jj1, ii1, jj2, ii2, solPart, node_order):
     sol1["Delay"] = [0,0];  #solPart{jj1,ii1}.obj
 
     sol2 = {}
-    sol2["obj"] = solPart[jj1][jj2]["obj"] + solPart[jj2][ii1]["obj"] + solPart[ii1][ii2]["obj"] - solPart[jj1][ii1]["obj"] - solPart[jj2][ii2]["obj"]
+    sol2["obj"] = solPart[jj1, jj2]["obj"] + solPart[jj2, ii1]["obj"] + solPart[ii1, ii2]["obj"] - solPart[jj1, ii1]["obj"] - solPart[jj2, ii2]["obj"]
     sol2["order"]= [1, 2, 1, 2]
-    sol2["Delay"] = [solPart[jj1][jj2]["obj"] + solPart[jj2][ii1]["obj"] - solPart[jj1][ii1]["obj"], solPart[jj2][ii1]["obj"] + solPart[ii1][ii2]["obj"] - solPart[jj2][ii2]["obj"]]
+    sol2["Delay"] = [solPart[jj1, jj2]["obj"] + solPart[jj2, ii1]["obj"] - solPart[jj1, ii1]["obj"], solPart[jj2, ii1]["obj"] + solPart[ii1, ii2]["obj"] - solPart[jj2, ii2]["obj"]]
 
     sol3 = {}
-    sol3["obj"] = solPart[jj1][jj2]["obj"] + solPart[jj2][ii2]["obj"] + solPart[ii2][ii1]["obj"] - solPart[jj1][ii1]["obj"] - solPart[jj2][ii2]["obj"]
+    sol3["obj"] = solPart[jj1, jj2]["obj"] + solPart[jj2, ii2]["obj"] + solPart[ii2, ii1]["obj"] - solPart[jj1, ii1]["obj"] - solPart[jj2, ii2]["obj"]
     sol3["order"]=[1, 2, 2, 1]
-    sol3["Delay"] = [solPart[jj1][jj2]["obj"] + solPart[jj2][ii2]["obj"] + solPart[ii2][ii1]["obj"] - solPart[jj1][ii1]["obj"],0]
+    sol3["Delay"] = [solPart[jj1, jj2]["obj"] + solPart[jj2, ii2]["obj"] + solPart[ii2, ii1]["obj"] - solPart[jj1, ii1]["obj"],0]
 
     # if jj1 == 3 and jj2 == 1 and ii1 == 24 and ii2 == 21:
     #     print(sol1["Delay"])
@@ -24,7 +24,7 @@ def LTIFM2_SP(jj1, ii1, jj2, ii2, solPart, node_order):
     #     print(sol3["obj"])
     #     asdfs
     # iterators = [jj1+1, ii1+1, jj2+1, ii2+1]
-    iterators = [node_order[jj1], node_order[jj2], node_order[ii1], node_order[ii2]]
+    iterators = [node_order[jj1], node_order[ii1], node_order[jj2], node_order[ii2]]
     if sol2["obj"] < 0:
         sol = [sol2["obj"]]
         sol.extend(sol2["Delay"])
