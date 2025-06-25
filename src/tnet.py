@@ -4,10 +4,6 @@ from src.utils import *
 import numpy as np
 import matplotlib.pyplot as plt
 import src.trafficAssignment.assign as ta
-from scipy.special import comb
-from scipy.linalg import block_diag
-import copy
-import time
 import pyproj
 import src.msa as msa
 from joblib import Parallel, delayed
@@ -101,44 +97,6 @@ class tNet():
             G.add_edge(j, i, length=self.G[i][j]['length'])
         self.G_pedestrian = G
 
-
-    @timeit
-    def build_full_layer(self):
-        G2 = self.G_supergraph.copy()
-        [G2.add_edge(str(i) + "rp",str(j)+"rp", t_0=nx.shortest_path_length(self.G, source=i, target=j, weight="t_0"), length=100, capacity=10000, type="rp") for i in self.G.nodes() if isinstance(i,int) for j in self.G.nodes() if isinstance(j,int) if i!=j]
-        [G2.add_edge(str(i), str(i)[:-1] + "rp", t_0=10/60/60, length=100, capacity=10000, type="frp") for i in self.G_supergraph.nodes() if "'" in str(i)]
-        [G2.add_edge(str(i)[:-1] + "rp", str(i), t_0=10/60/60, length=100, capacity=10000, type="frp") for i in self.G_supergraph.nodes() if "'" in str(i)]
-        self.G_supergraph = G2
-
-    def process_node(self, i, G):
-        edges = []
-        for j in G.nodes():
-            if i != j:
-                t_0 = nx.shortest_path_length(G, source=int(i), target=int(j), weight="t_0")
-                edges.append((str(i) + 'rp', str(j)+'rp', {
-                    't_0': t_0, 'length': 100, 'capacity': 10000, 'type': "rp"
-                }))
-        # Add 'frp' edges
-        edges.append((str(i)+'rp', str(i) + "'", {
-            't_0': 10/60/60, 'length': 100, 'capacity': 10000, 'type': "frp"
-        }))
-        edges.append((str(i) + "'", str(i)+'rp', {
-            't_0': 10/60/60, 'length': 100, 'capacity': 10000, 'type': "frp"
-        }))
-        return edges
-
-    def build_full_layer_parallel(self):
-        G2 = self.G_supergraph.copy()
-        results = Parallel(n_jobs=-1)(
-            delayed(self.process_node)(i, self.G)
-            for i in self.G.nodes()
-            )
-        for edge_list in results:
-            for u, v, attr in edge_list:
-                G2.add_edge(u, v, **attr)
-        self.G_supergraph = G2
-
-
     def _edges_for_origin(self, i: int, G_road: nx.Graph, all_nodes: list[int]) -> list[tuple]:
         edges = []
 
@@ -182,23 +140,6 @@ class tNet():
             u, v, attr = self._edges_for_destination(j)
             G2.add_edge(u, v, **attr)
         self.G_supergraph=G2
-            
-    def build_full_graph(self):
-        G2 = nx.DiGraph()
-        [G2.add_edge(str(i) + "rp",str(j)+"rp", t_0=nx.shortest_path_length(self.G, source=i, target=j, weight="t_0"), length=100, capacity=10000, type="rp") for i in self.G.nodes() if isinstance(i,int) for j in self.G.nodes() if isinstance(j,int) if i!=j]
-        [G2.add_edge(str(i), str(i)[:-1] + "rp", t_0=10/60/60, length=100, capacity=10000, type="frp") for i in self.G_supergraph.nodes() if "'" in str(i)]
-        [G2.add_edge(str(i)[:-1] + "rp", str(i), t_0=10/60/60, length=100, capacity=10000, type="frp") for i in self.G_supergraph.nodes() if "'" in str(i)]
-        return G2
-
-    def build_pickup_layer(self):
-        G2 = self.G_supergraph.copy()
-        [G2.add_edge(str(i), str(i) + 'u', length=0, t_0=0, capacity=10000, type='u')
-         for i in self.G_supergraph.nodes() if isinstance(i,int)]
-        [G2.add_edge(str(i) + 'u', str(i), length=0, t_0=0, capacity=10000, type='u')
-         for i in self.G_supergraph.nodes() if isinstance(i,int)]
-        
-        self.G_supergraph = G2
-
 
     def build_layer(self, one_way=True, avg_speed=3.1 ,capacity=99999, symb="'", identical_G=False):
         """
@@ -223,37 +164,6 @@ class tNet():
                 [G2.add_edge(str(j) + symb, str(i) + symb, length=self.G[i][j]['length'], t_0=self.G[i][j]['length'] / avg_speed, capacity=capacity, type=symb) for i, j in self.G.edges() if isinstance(i, int) == True and isinstance(j, int)]
             [G2.add_edge(str(i) + "'", str(i) + symb, t_0=10/60/60, capacity=capacity, type='f' + symb, length=0.1) for i in self.G.nodes()]
             [G2.add_edge(str(i) + symb, str(i) + "'", t_0=10/60/60, capacity=capacity, type='f' + symb, length=0.1) for i in self.G.nodes()]
-        self.G_supergraph = G2
-
-
-    def build_supergraph(self, walk_multiplier=1, identical_G=False):
-        """
-        build a supergraph mixing pedestrian and vehicle networks
-
-        Parameters
-        ----------
-
-        self: a tnet object
-
-        Returns
-        -------
-        An attribute on the object containing the pedestrian network
-
-        """
-        G2 = self.G.copy()
-        if identical_G == False:
-            for i, j in self.G.edges():
-                if isinstance(i, int) == True and isinstance(j, int):
-                    G2.add_edge(str(i) + "'", str(j) + "'", length=self.G[i][j]['length'],
-                               t_0=self.G[i][j]['length'] / 3.1 / walk_multiplier, capacity=10000, type='p')
-                    G2.add_edge(str(j) + "'", str(i) + "'", length=self.G[i][j]['length'],
-                               t_0=self.G[i][j]['length'] / 3.1 / walk_multiplier, capacity=10000, type='p')
-                    G2.add_edge(i, str(i) + "'", t_0=10/60/60, capacity=99999, type='f', length=0.1)
-                    G2.add_edge(str(i) + "'", i, t_0=10/60/60, capacity=99999, type='f', length=0.1)
-                    G2.add_edge(j, str(j) + "'", t_0=10/60/60, capacity=99999, type='f', length=0.1)
-                    G2.add_edge(str(j) + "'", j, t_0=10/60/60, capacity=99999, type='f', length=0.1)
-                        
-                
         self.G_supergraph = G2
 
     def build_walking_supergraph(self, walk_multiplier=1, identical_G=False):
@@ -283,10 +193,6 @@ class tNet():
                         
                 
         self.G_supergraph = G2
-
-    def add_walking_layer(self, walk_multiplier=1):
-        self.build_supergraph(walk_multiplier=walk_multiplier)
-
 
     def add_layer(self, layer, layer_symb, speed=False):
         """
