@@ -62,6 +62,8 @@ class RidePoolingSimulationCore:
             prev2_obj, prev_obj = prev_obj, obj
 
             D_rp = self._extract_ridepool_od()
+            # np.save("temp.npy", D_rp)
+            # D_rp = np.load("temp.npy")
             y, yr, demand_split, gamma_arr = self._compute_pooled(D_rp)
             total_cars, reb_cars = self._update_road_edge_costs(y, yr)
             

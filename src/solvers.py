@@ -12,7 +12,7 @@ from scipy.sparse import kron
 from tqdm import tqdm
 import gurobipy as gp
 from gurobipy import GRB, LinExpr, QuadExpr, quicksum
-from Utilities.RidePooling.LTIFM_reb import LTIFM_reb_sparse
+from src.LTIFM_reb import LTIFM_reb_sparse
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
@@ -223,23 +223,22 @@ def _solve_cars_gurobi(tnet, snap: NetSnapshot, params: SolverParams) -> CARSRes
         m.optimize()
     _perform_opt()
 
-    # gather results --------------------------------------------------
-    flows = np.array([
-        sum(x[i, j].X for j in range(len(snap.origins)))
-        for i in range(snap.N_edges)
-    ])
-    prev_mat = np.array([[x[i, j].X for j in range(len(snap.origins))]
-                     for i in range(snap.N_edges)])
-    cars_expected = expr.getValue() 
-    avg_time = [0.0]
-    obj = m.ObjVal
+    x_vars = list(x.values())
+    x_vals = m.getAttr("X", x_vars)
 
+    x_mat  = np.asarray(x_vals, dtype=float)\
+                .reshape(snap.N_edges, len(snap.origins), order="C")
+
+    flows = x_mat.sum(axis=1)
+    prev_mat = x_mat
+    obj = m.ObjVal
+    cars_expected = expr.getValue()
     # write flows back for downstream code
     for i, (u, v) in enumerate(snap.edge_order):
         tnet.G_supergraph[u][v]["flowNoRebalancing"] = flows[i]
 
     m.dispose()
-    return CARSResult(avg_time=avg_time, x_vec=prev_mat, expected_cars=cars_expected, obj_val=obj)
+    return CARSResult(avg_time=[0.0], x_vec=prev_mat, expected_cars=cars_expected, obj_val=obj)
 
 ###############################################################################
 # 0. Functional helper: compute_results                                        #

@@ -97,7 +97,7 @@ def main() -> None:
             sim.run()
             sim.run_private()
         sim.log_penrate_results(pen_rate)
-    sim.save_penrate_csv()
+        sim.save_penrate_csv()
             
 
 
