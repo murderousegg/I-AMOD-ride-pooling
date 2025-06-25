@@ -3,16 +3,12 @@ This project proposes an approach to synthesize the works by [Paparella et al.](
 
 # File organisation and running the code
 
-As of 20-12, the code is yet to be combined. The ride-pooling approach, which was originally written in MatLab, is included as Ride-pooling.py, and its uitlity functions are included in /Utilities/RidePooling/. The datasets stored in /NYC20/ and /NYC250/ are copied from the Paparalla, but the digraph data is modified beforehand using Utilities/convert_digraph.m, as python does not support the original matlab format for the digraph. To run this on one of the datasets, modify CITY_FOLDER at the top of Ride-pooling.py to the name of the folder that you want to run. If only parts of the algorithm need to be run, simply comment out the functions from main() at the bottom of the file. By default, the code analyses ride-pooling with a max of 2, 3 and 4 people.
+Data for some networks is stored in the data folder. The main focus of the project is NYC, which has its own specific folder which also includes subway data. None of the other data sources has any public transit data. The code that runs the experiments can be found in the expirements folder. The code is currently setup to run NYC. To get this to work, make sure that you run reduce_roadgraph.py first. This removes many points from the roadrgraph and groups OD's to the closest point in the new roadgraph. This smaller graph is only used to create the ride-pooling layer.
 
-## Intermodal Mobility on Demand
-The code from [Wollenstein-betech et al., 2021] is currently copied into /intermodal/. To run an expirement, a command needs to be entered into the console:
-`python3 -m experiments.{name of the file without extension}`
-Note that there are many different types of experiments listed in the expiriments folder. In the future, only the necessary parts of the code will be reused. Additionally, all of data used in that paper are in a different structure than the data from [Paparella et al.]. To solve this issue, the code still needs to be modified to some extend in order to accept the new formatting. 
+Next, run create_save_NYC.py. This compiles the supergraph and stores it in a pickeled file. Now, 3 pickled files should exist under data/gml. By then running create_rp_list_small.py, a giant array can be created which contains all possible ridepooling sequences, along with the order, delay and cost. This is stored as a compressed numpy file (.npz) in NYC/. 
 
-Requirements: gurobipy, networkx, scipy, numpy, pwlf, joblib, h5py
+Now all the preparation is done, and the optimization can begin. To optimize for a 100/% penetration rate, run disjoint_refactor.py. This will perform the disjoint optimization strategy as outlined in the paper. To run the penetration rate problem, run disjoint_penrate_refactor.py. I should warn you, this will probably take an insane amount of time. To reduce runtime, play with the amount of penetration rates and the depth of the Stackelberg game.
 
-# Main functionality
-The main expiriment can be run by using
-`python3 -m experiments.ride-pooling`
-First, a network is definied similar to the networks described by [Wollenstein-betech et al., 2021]. Along with the normal modes of transport (walking, public transport, cars), a ride-pooling layer is created. Then, all spatially feasible bags/sequences using the algorithm proposed by [Paparella et al., 2024] are computed for the ride-pooling layer. Each sequence corresponds to a selection variable in the optimization problem, and a demand matrix can be created as a linear combination of all sequences (that are selected). 
+Results are stored in the /results/ folder. All results are stored in .csv files, which can be used for plotting later. Additionally, a capture of the supergraph is stored as a pickled file. This can be used to visualize the network, or to find individual routes.
+
+To run the files, simply type `python -m experiments.[experiment_name]` (or `python3` depending on installation). However, it is highly recommended to do most of the work on a server given the amount of memory required and the benefits of multiprocessing.
