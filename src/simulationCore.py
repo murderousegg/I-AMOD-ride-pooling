@@ -62,6 +62,8 @@ class RidePoolingSimulationCore:
             prev2_obj, prev_obj = prev_obj, obj
 
             D_rp = self._extract_ridepool_od()
+            # np.save("temp.npy", D_rp)
+            # D_rp = np.load("temp.npy")
             y, yr, demand_split, gamma_arr = self._compute_pooled(D_rp)
             total_cars, reb_cars = self._update_road_edge_costs(y, yr)
             
@@ -80,10 +82,12 @@ class RidePoolingSimulationCore:
                 self.cfg.gamma_cars * car_ratio_smoothed
                 + (1 - self.cfg.gamma_cars) * (total_cars / expected_cars)
             )
+            
             self._update_supergraph_costs(D_rp, gamma_arr)
             if it == 0:
                 self._record_metrics(demand_split, total_cars, reb_cars)
             logger.info("Completed iteration %d", it + 1)
+            r = 1 + self.metrics["double_share"][-1]
         self._save_metrics_csv()
         self._plot_mode_share()
         
@@ -139,6 +143,7 @@ class RidePoolingSimulationCore:
             vehicle_limit=self.cfg.vehicle_limit,
             c_ratio=c_ratio,
             reb_cars=reb_cars_est,
+            r=r
         )
         snap = getattr(self, "_cars_snapshot", None)
         if snap is None:
@@ -381,5 +386,5 @@ class RidePoolingSimulationCore:
         import pandas as pd
 
         df = pd.DataFrame(self.metrics)
-        df.to_csv(self.cfg.results_csv + ".csv", index=False)
+        df.to_csv(self.cfg.results_csv// f"results_{self.cfg.city_tag}.csv", index=False)
         logger.info("Metrics saved → %s", self.cfg.results_csv)

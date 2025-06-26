@@ -34,10 +34,8 @@ from gurobipy import GRB, LinExpr, QuadExpr, quicksum
 
 # heavy project-specific modules ---------------------------------------------
 import src.tnet as tnet
-import src.CARS as cars  # legacy import kept for compatibility
 import experiments.build_NYC_subway_net as nyc
-from Utilities.RidePooling.LTIFM_reb import LTIFM_reb, LTIFM_reb_sparse
-from Utilities.RidePooling.calculate_gamma_k2 import calculate_gamma_k2
+from src.LTIFM_reb import LTIFM_reb, LTIFM_reb_sparse
 from Utilities.RidePooling.probcomb import probcombN
 
 ###############################################################################

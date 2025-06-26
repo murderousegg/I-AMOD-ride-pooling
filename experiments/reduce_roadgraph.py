@@ -1,20 +1,12 @@
 import numpy as np
 from scipy import io
 import networkx as nx
-import src.tnet as tnet
 import experiments.build_NYC_subway_net as nyc
 import pickle
-from scipy.spatial import KDTree 
+from scipy.spatial import cKDTree
+from typing import Sequence, Tuple, Dict
 
-# ---------- helpers --------------------------------------------------------
-def haversine(lon1, lat1, lon2, lat2):
-    R = 6371.0
-    lon1, lat1, lon2, lat2 = map(np.radians, [lon1, lat1, lon2, lat2])
-    dlon, dlat = lon2 - lon1, lat2 - lat1
-    a = np.sin(dlat / 2) ** 2 + \
-        np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
-    return 2 * R * np.arcsin(np.sqrt(a))
-
+EARTH_R = 6_371_000.0
 # ---------- load base network ---------------------------------------------
 tNet, _, _ = nyc.build_NYC_net("data/net/NYC/", only_road=True)
 tNet.read_node_coordinates("data/pos/NYC.txt")
@@ -22,65 +14,87 @@ tNet_coords = np.array([tNet.G.nodes[i]["pos"] for i in tNet.G.nodes()])
 tNet_coords = tNet_coords[:, ::-1]
 node_list = list(tNet.G.nodes())                       # index → label
 node_idx_map = {n: i for i, n in enumerate(node_list)} # label → index
+edge_list = list(tNet.G.edges())
 
-# ---------- MATLAB mini-graph ---------------------------------------------
-mat = io.loadmat("small_graph160.mat", squeeze_me=True)
-edge_list = np.asarray(mat["edge_list"])     # shape (E, 3)
-latLon_mat = np.asarray(mat["NodesLatLon"])[:,:2]  # shape (N_mat, 2)
-roadCap = mat["RoadCap"]
+def latlon_to_xy(lat: np.ndarray,
+                 lon: np.ndarray,
+                 lat0: float | None = None) -> np.ndarray:
+    """
+    Convert geographic coordinates to a local Euclidean (x, y) system.
 
-# ------------------------------------------------------------------
-# 1. build a KD-tree on *road* coords  (lat, lon order) ------------
-# ------------------------------------------------------------------
-mat_ids_with_edges = np.unique(edge_list[:, :2])         # 1-based IDs
-mask = np.isin(np.arange(1, len(latLon_mat)+1), mat_ids_with_edges)
+    Parameters
+    ----------
+    lat, lon : 1-D arrays of degrees
+    lat0     : reference latitude in degrees.  If None, use mean(lat).
 
-latLon_mat = latLon_mat[mask]          # only 274 nodes instead of 357
-road_tree = KDTree(tNet_coords)          # tNet_coords = [[lat, lon], ...]
+    Returns
+    -------
+    xy : ndarray shape (N, 2)  – metres
+    """
+    lat_rad = np.radians(lat)
+    lon_rad = np.radians(lon)
+    lat0_rad = np.radians(lat0 if lat0 is not None else lat.mean())
 
-# map every MATLAB node (1-based) to its nearest road node
-# --> returns 0-based indices into tNet_coords / node_list
-nearest_idx = road_tree.query(latLon_mat)[1]   # latLon_mat already [lat, lon]
-closest_nodes = [node_list[i] for i in nearest_idx]
+    x = EARTH_R * (lon_rad - lon_rad.mean()) * np.cos(lat0_rad)
+    y = EARTH_R * (lat_rad - lat_rad.mean())
+    return np.column_stack((x, y))              # (N, 2)
 
-# ------------------------------------------------------------------
-# 2. build the reduced road graph ----------------------------------
-# ------------------------------------------------------------------
-new_edges, capacities = [], []
-for u_id, v_id, t0 in edge_list:
-    u_label = closest_nodes[int(u_id) - 1]          # ONE subtraction, not two
-    v_label = closest_nodes[int(v_id) - 1]
-    new_edges.append((u_label, v_label, t0))
-    capacities.append(roadCap[int(u_id) - 1, int(v_id) - 1])
+def prune_greedy_manhattan(lat: Sequence[float],
+                           lon: Sequence[float],
+                           k_keep: int,
+                           *,
+                           verbose: bool = True
+                           ) -> Tuple[np.ndarray, Dict[int, int]]:
+    """
+    Keep k_keep nodes; minimise total extra distance (greedy heuristic).
+
+    Returns
+    -------
+    keep_idx      : ndarray of original indices kept (length = k_keep)
+    nearest_kept  : dict  orig_index → kept_index   (index into keep_idx)
+    """
+    lat = np.asarray(lat, dtype=float)
+    lon = np.asarray(lon, dtype=float)
+    N = len(lat)
+    if k_keep >= N:
+        raise ValueError("k_keep must be smaller than number of nodes")
+
+    XY = latlon_to_xy(lat, lon)
+    keep = np.ones(N, dtype=bool)
+
+    while keep.sum() > k_keep:
+        idx_keep = np.flatnonzero(keep)
+        tree     = cKDTree(XY[idx_keep])
+        dists, _ = tree.query(XY[idx_keep], k=3)        # self, nn1, nn2
+        penalty  = dists[:, 2]                          # fallback distance
+        drop_idx = idx_keep[np.argmin(penalty)]
+        keep[drop_idx] = False
+        if verbose and keep.sum() % 500 == 0:
+            print(f"... {keep.sum()} left")
+
+    keep_idx = np.flatnonzero(keep)                     # original ordering
+
+    # ------------------------------------------------------------------
+    # 3)  map every node to its nearest kept node
+    # ------------------------------------------------------------------
+    tree_kept = cKDTree(XY[keep_idx])                   # build once
+    _, nn = tree_kept.query(XY, k=1)                    # nearest kept
+    nearest_kept = {orig: int(nn[i]) for i, orig in enumerate(range(N))}
+    # nn[i] gives *position* inside keep_idx, not global index.
+
+    return keep_idx, nearest_kept
+
+keep, mapping = prune_greedy_manhattan(tNet_coords[:,0], tNet_coords[:,1], k_keep=270)
 roadGraph = nx.DiGraph()
-for node_label in set(closest_nodes):
-    roadGraph.add_node(node_label)
-for (u, v, t0), cap in zip(new_edges, capacities):
-    t0_true = nx.shortest_path_length(tNet.G, source=u, target=v, weight='t_0')
-    roadGraph.add_edge(u, v, t_0=t0_true, capacity=cap * 60)
-# ------------------------------------------------------------------
-# 3. remap each destination in the OD matrix -----------------------
-# ------------------------------------------------------------------
-mat_tree = KDTree(latLon_mat)            # (lat, lon) – same order as above
+for node in keep:
+    roadGraph.add_node(node)
+
+
 new_g = {}
 for (orig, dest), q in tNet.g.items():
-    dest_idx = node_idx_map[int(dest)]   # dest is plain int (no prime yet)
-    dest_coord = tNet_coords[dest_idx]   # [lat, lon]
-
-    orig_idx = node_idx_map[int(orig)]   # dest is plain int (no prime yet)
-    orig_coord = tNet_coords[orig_idx]   # [lat, lon]
-
-    # nearest MATLAB node --> index into closest_nodes
-    mat_idx = mat_tree.query(dest_coord)[1]
-    mat_idx_orig = mat_tree.query(orig_coord)[1]
-    dest_new = closest_nodes[int(mat_idx)]
-    orig_new = closest_nodes[int(mat_idx_orig)]
-
-    new_g[(orig_new, dest_new)] = q             # origin stays unchanged
-
-# ------------------------------------------------------------------
-# 4. add layer suffixes & pickle -----------------------------------
-# ------------------------------------------------------------------
+    dest_new = mapping[int(dest)]
+    orig_new = mapping[int(orig)]
+    new_g[(orig_new, dest_new)] = new_g.get((orig_new, dest_new), 0.0) + q
 tNet.g = {(f"{k[0]}'", f"{k[1]}''"): v for k, v in new_g.items()}
 
 with open("data/gml/NYC_small_demands.gpickle", "wb") as f:

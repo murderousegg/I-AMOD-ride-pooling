@@ -12,7 +12,7 @@ from scipy.sparse import kron
 from tqdm import tqdm
 import gurobipy as gp
 from gurobipy import GRB, LinExpr, QuadExpr, quicksum
-from Utilities.RidePooling.LTIFM_reb import LTIFM_reb_sparse
+from src.LTIFM_reb import LTIFM_reb_sparse
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
@@ -75,6 +75,7 @@ class SolverParams:
     reb_cars: float = 0.0
     method: int = -1  # Gurobi Method param
     threads: int | None = None
+    r: float = 2
 
 @dataclass
 class NetSnapshot:
@@ -158,8 +159,9 @@ def _add_vehicle_cap(m: gp.Model, tnet, snap: NetSnapshot, x, xr, params: Solver
             if xr is not None and params.iteration == 0:
                 expr.add(coeff * xr[j])
     if params.iteration == 0:
-        m.addConstr(expr <= params.vehicle_limit * 2)  # r default 2
+        m.addConstr(expr <= params.vehicle_limit * params.r)  # r default 2
     else:
+        expr = expr / params.r
         expr.add(params.reb_cars)
         m.addConstr(expr * params.c_ratio <= params.vehicle_limit)
     return expr
@@ -195,7 +197,7 @@ def _build_objective(tnet, snap: NetSnapshot, x, params: SolverParams):
     for i in range(snap.N_edges):
         for j in range(n_o):
             diff = x[i, j] - float(prev[i, j])
-            prox.add(diff * diff)                     # no cross-products
+            prox.add(diff * diff)
 
     return base_obj + half_mu * prox
 
@@ -223,23 +225,22 @@ def _solve_cars_gurobi(tnet, snap: NetSnapshot, params: SolverParams) -> CARSRes
         m.optimize()
     _perform_opt()
 
-    # gather results --------------------------------------------------
-    flows = np.array([
-        sum(x[i, j].X for j in range(len(snap.origins)))
-        for i in range(snap.N_edges)
-    ])
-    prev_mat = np.array([[x[i, j].X for j in range(len(snap.origins))]
-                     for i in range(snap.N_edges)])
-    cars_expected = expr.getValue() 
-    avg_time = [0.0]
-    obj = m.ObjVal
+    x_vars = list(x.values())
+    x_vals = m.getAttr("X", x_vars)
 
+    x_mat  = np.asarray(x_vals, dtype=float)\
+                .reshape(snap.N_edges, len(snap.origins), order="C")
+
+    flows = x_mat.sum(axis=1)
+    prev_mat = x_mat
+    obj = m.ObjVal
+    cars_expected = expr.getValue()
     # write flows back for downstream code
     for i, (u, v) in enumerate(snap.edge_order):
         tnet.G_supergraph[u][v]["flowNoRebalancing"] = flows[i]
 
     m.dispose()
-    return CARSResult(avg_time=avg_time, x_vec=prev_mat, expected_cars=cars_expected, obj_val=obj)
+    return CARSResult(avg_time=[0.0], x_vec=prev_mat, expected_cars=cars_expected, obj_val=obj)
 
 ###############################################################################
 # 0. Functional helper: compute_results                                        #
@@ -351,31 +352,22 @@ def compute_results(
 
     np.fill_diagonal(full_solo_demand,   0)
     np.fill_diagonal(full_pooled_demand, 0)
-
+    full_demand = full_solo_demand + full_pooled_demand
     # LTIFM per class ----------------------------------------------------
-    sol_np = LTIFM_reb_sparse(full_solo_demand, road_graph, fcoeffs=fcoeffs)
-    sol_rp = LTIFM_reb_sparse(full_pooled_demand, road_graph, fcoeffs=fcoeffs)
+    sol_np = LTIFM_reb_sparse(full_demand, road_graph, fcoeffs=fcoeffs)
 
-    full_solo_demand -= np.diag(np.diag(full_solo_demand))
-    full_pooled_demand -= np.diag(np.diag(full_pooled_demand))
+    full_demand -= np.diag(np.diag(full_demand))
     
-    y = sol_np["x"] + sol_rp["x"]
-    yr = sol_np["xr"] + sol_rp["xr"]
+    y = sol_np["x"]
+    yr = sol_np["xr"]
 
-    ### determine pooling percentage
-    TrackDems = [np.sum(demand), np.sum(solo_demand),np.sum(pooled_demand)]
-    PercNRP = TrackDems[1]/(TrackDems[2] + TrackDems[1])
-    # Normalize TotG row-wise and scale it by (1 - PercNRP)
-    TotG_normalized = total_gamma / np.sum(total_gamma, axis=0, keepdims=True)  # Normalize rows of TotG
-    scaled_TotG = TotG_normalized * (1 - PercNRP)  # Scale by (1 - PercNRP)
-    # Combine PercNRP and the scaled TotG into a new array
-    total_PercNRP = np.hstack([PercNRP, scaled_TotG])
+
 
     demand_stats = (
         float(original_demand.sum()),
         float(solo_demand.sum()),
         float(pooled_demand.sum()),
-        total_PercNRP[0],
-        total_PercNRP[1]
+        np.sum(full_solo_demand)/(np.sum(full_solo_demand) + np.sum(full_pooled_demand)),
+        np.sum(full_pooled_demand)/(np.sum(full_solo_demand) + np.sum(full_pooled_demand))
     )
     return y, yr, demand_stats, gamma_arr

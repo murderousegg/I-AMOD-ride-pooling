@@ -101,7 +101,7 @@ def compute_LinearComb2_for_jj1(jj1, N_nodes, solPart):
     sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,2] > 15 ),0)  #delay
     sol2_LC = np.delete(sol2_LC,np.argwhere(sol2_LC[:,1] > 15 ),0)  #delay
     #store in .npy file
-    # np.savez_compressed(CITY_FOLDER + "/L2/MatL2_" + f"{jj1+1}.npz", sol2_LC)
+    np.savez_compressed(CITY_FOLDER + "/L2/MatL2_" + f"{jj1+1}.npz", sol2_LC)
     return sol2_LC
     
 

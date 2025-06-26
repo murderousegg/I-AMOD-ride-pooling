@@ -1,5 +1,4 @@
 import src.tnet as tnet
-import src.CARS as cars
 import os
 from datetime import datetime
 
