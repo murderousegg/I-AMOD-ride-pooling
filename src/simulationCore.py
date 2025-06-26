@@ -82,11 +82,12 @@ class RidePoolingSimulationCore:
                 self.cfg.gamma_cars * car_ratio_smoothed
                 + (1 - self.cfg.gamma_cars) * (total_cars / expected_cars)
             )
-            r = 1 + self.metrics["double_share"][-1]
+            
             self._update_supergraph_costs(D_rp, gamma_arr)
             if it == 0:
                 self._record_metrics(demand_split, total_cars, reb_cars)
             logger.info("Completed iteration %d", it + 1)
+            r = 1 + self.metrics["double_share"][-1]
         self._save_metrics_csv()
         self._plot_mode_share()
         
