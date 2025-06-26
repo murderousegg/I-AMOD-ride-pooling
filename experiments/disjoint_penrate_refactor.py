@@ -82,7 +82,7 @@ class penrateSimulation(RidePoolingSimulationCore):
     
     def save_penrate_csv(self):
         df = pd.DataFrame(self.penrate_metrics)
-        df.to_csv(self.cfg.results_csv + f"_penrate_metrics.csv", index=False)
+        df.to_csv(self.cfg.results_csv / f"results_{self.cfg.city_tag}_penrate_metrics.csv", index=False)
         logger.info("Metrics saved → %s", self.cfg.results_csv)
 
     

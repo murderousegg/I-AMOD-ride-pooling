@@ -247,18 +247,11 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
 
     zero_rhs = np.zeros(N_nodes)
     m.addMConstr(A_inc, vars_inc, '=', zero_rhs, name="Incidence")
-    
-    
     # Solve the model
     m.optimize()
-
     # Extract solution
-    x_mat = np.zeros((N_edges, N_nodes))
-    for i in range(N_edges):
-        for j in range(N_nodes):
-            x_mat[i,j] = x[i,j].X
-    xr_vals = np.array([v.X for v in m.getVars() if "xr[" in v.varName])
-
+    x_mat   = x.X
+    xr_vals = xr.X
     # Package solution
     sol = {
         "x": x_mat,
@@ -266,7 +259,6 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
         "obj": obj.getValue()
     }
     
-
     # Reshape x to matrix and calculate individual times
     sol["IndividualTimes"] = 0
     sol["Dem"] = Demands

@@ -46,4 +46,4 @@ class SimulationConfig:
     @property
     def results_csv(self) -> Path:
         self.results_dir.mkdir(parents=True, exist_ok=True)
-        return self.results_dir / f"results_{self.city_tag}"
+        return self.results_dir

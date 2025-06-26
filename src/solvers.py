@@ -75,6 +75,7 @@ class SolverParams:
     reb_cars: float = 0.0
     method: int = -1  # Gurobi Method param
     threads: int | None = None
+    r: float = 2
 
 @dataclass
 class NetSnapshot:
@@ -158,8 +159,9 @@ def _add_vehicle_cap(m: gp.Model, tnet, snap: NetSnapshot, x, xr, params: Solver
             if xr is not None and params.iteration == 0:
                 expr.add(coeff * xr[j])
     if params.iteration == 0:
-        m.addConstr(expr <= params.vehicle_limit * 2)  # r default 2
+        m.addConstr(expr <= params.vehicle_limit * params.r)  # r default 2
     else:
+        expr = expr / params.r
         expr.add(params.reb_cars)
         m.addConstr(expr * params.c_ratio <= params.vehicle_limit)
     return expr
@@ -195,7 +197,7 @@ def _build_objective(tnet, snap: NetSnapshot, x, params: SolverParams):
     for i in range(snap.N_edges):
         for j in range(n_o):
             diff = x[i, j] - float(prev[i, j])
-            prox.add(diff * diff)                     # no cross-products
+            prox.add(diff * diff)
 
     return base_obj + half_mu * prox
 
