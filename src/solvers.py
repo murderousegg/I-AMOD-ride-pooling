@@ -352,31 +352,22 @@ def compute_results(
 
     np.fill_diagonal(full_solo_demand,   0)
     np.fill_diagonal(full_pooled_demand, 0)
-
+    full_demand = full_solo_demand + full_pooled_demand
     # LTIFM per class ----------------------------------------------------
-    sol_np = LTIFM_reb_sparse(full_solo_demand, road_graph, fcoeffs=fcoeffs)
-    sol_rp = LTIFM_reb_sparse(full_pooled_demand, road_graph, fcoeffs=fcoeffs)
+    sol_np = LTIFM_reb_sparse(full_demand, road_graph, fcoeffs=fcoeffs)
 
-    full_solo_demand -= np.diag(np.diag(full_solo_demand))
-    full_pooled_demand -= np.diag(np.diag(full_pooled_demand))
+    full_demand -= np.diag(np.diag(full_demand))
     
-    y = sol_np["x"] + sol_rp["x"]
-    yr = sol_np["xr"] + sol_rp["xr"]
+    y = sol_np["x"]
+    yr = sol_np["xr"]
 
-    ### determine pooling percentage
-    TrackDems = [np.sum(demand), np.sum(solo_demand),np.sum(pooled_demand)]
-    PercNRP = TrackDems[1]/(TrackDems[2] + TrackDems[1])
-    # Normalize TotG row-wise and scale it by (1 - PercNRP)
-    TotG_normalized = total_gamma / np.sum(total_gamma, axis=0, keepdims=True)  # Normalize rows of TotG
-    scaled_TotG = TotG_normalized * (1 - PercNRP)  # Scale by (1 - PercNRP)
-    # Combine PercNRP and the scaled TotG into a new array
-    total_PercNRP = np.hstack([PercNRP, scaled_TotG])
+
 
     demand_stats = (
         float(original_demand.sum()),
         float(solo_demand.sum()),
         float(pooled_demand.sum()),
-        total_PercNRP[0],
-        total_PercNRP[1]
+        np.sum(full_solo_demand)/(np.sum(full_solo_demand) + np.sum(full_pooled_demand)),
+        np.sum(full_pooled_demand)/(np.sum(full_solo_demand) + np.sum(full_pooled_demand))
     )
     return y, yr, demand_stats, gamma_arr
