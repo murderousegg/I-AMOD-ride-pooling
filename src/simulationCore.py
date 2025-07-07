@@ -395,16 +395,15 @@ class RidePoolingSimulationCore:
         ax1.set_xlabel("Iteration")
         ax1.set_ylabel("User hours travelled", color=color)
         ax1.tick_params(axis='y', labelcolor=color)
-        ax1.set_ylim([0,max(bottom)+2000])
         ax2 = ax1.twinx()
         color = 'tab:red'
-        ax2.set_ylabel(r"[\%] of rp requests pooled", color=color)
+        ax2.set_ylabel(r"($\mathrm{\%}$) of rp requests pooled", color=color)
         ax2.plot(x, M["double_share"], color=color, marker = 'o')
         ax2.tick_params(axis='y', labelcolor=color)
-        ax2.set_ylim([0.8,1.2])
-        fig.legend(loc='upper right')
+        ax2.set_ylim([0.9,1.0])
+        fig.legend(loc='bottom left')
         fig.tight_layout()
-        fig.savefig(f"results/mode_share.pdf", format='pdf')
+        fig.savefig(f"{self.cfg.results_dir}mode_share.pdf", format='pdf')
 
 
     # ---------- CSV output --------------------------------------------
@@ -413,5 +412,5 @@ class RidePoolingSimulationCore:
         import pandas as pd
 
         df = pd.DataFrame(self.metrics)
-        df.to_csv(self.cfg.results_csv / f"results_{self.cfg.city_tag}.csv", index=False)
+        df.to_csv(self.cfg.results_dir + f"results_{self.cfg.city_tag}.csv", index=False)
         logger.info("Metrics saved → %s", self.cfg.results_csv)
