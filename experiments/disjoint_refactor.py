@@ -36,7 +36,7 @@ from gurobipy import GRB, LinExpr, QuadExpr, quicksum
 import src.tnet as tnet
 import experiments.build_NYC_subway_net as nyc
 from src.LTIFM_reb import LTIFM_reb_sparse
-from Utilities.RidePooling.probcomb import probcombN
+from src.solvers import probcombN
 
 ###############################################################################
 # 1.  Global logging setup                                                     #

@@ -167,15 +167,8 @@ def LTIFM_reb(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, exogeno
     
     return sol
 
-def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, exogenous_G=False):
-    env = gp.Env(empty=True)
-    env.setParam("OutputFlag",0)
-    env.start()
-    start = time.time()
-    # For the digraph
 
-    # Binc = nx.incidence_matrix(G)
-    # Explicitly set the order of nodes and edges if needed
+def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, stackelberg=False):
     node_order = list(G.nodes())
     edge_order = list(G.edges())
 
@@ -192,62 +185,67 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
     
     # Initialize Gurobi model and variables
     m = gp.Model("LTIFM_reb")
-    m.setParam('OutputFlag',0 )
+    m.setParam('OutputFlag',0)
+    m.setParam("Method", 2)
+    m.setParam("Crossover", 0)
     x = m.addMVar((N_edges, N_nodes), lb=0, name="x")
     xr = m.addMVar(N_edges, lb=0, name="xr")
     e = m.addVars(n, N_edges, vtype=GRB.CONTINUOUS, lb=0, name="e")
     # Set up objective
-    if not exogenous_G:
+    edge_times = [G[u][v].get("t_0") for u, v in edge_order]
+    capacities = [G[u][v].get("capacity") for u, v in edge_order]
+    if not stackelberg:
         obj = gp.quicksum(\
-                gp.quicksum(G[edge_order[i][0]][edge_order[i][1]]['t_0'] * a[l]/G[edge_order[i][0]][edge_order[i][1]]['capacity'] *( \
-                e[l,i] * (0+gp.quicksum(((theta[k + 1] - theta[k])*G[edge_order[i][0]][edge_order[i][1]]['capacity']) for k in range(0,l))) \
-                + e[l,i] * ((theta[l + 1] - theta[l])*G[edge_order[i][0]][edge_order[i][1]]['capacity'] ) \
-                + (theta[l+1] - theta[l])*G[edge_order[i][0]][edge_order[i][1]]['capacity']*(0+gp.quicksum(e[k,i] for k in range(l+1, len(theta)-1))) \
+                gp.quicksum(edge_times[i] * a[l]/capacities[i] *( \
+                e[l,i] * (0+gp.quicksum(((theta[k + 1] - theta[k])*capacities[i]) for k in range(0,l))) \
+                + e[l,i] * ((theta[l + 1] - theta[l])*capacities[i] ) \
+                + (theta[l+1] - theta[l])*capacities[i]*(0+gp.quicksum(e[k,i] for k in range(l+1, len(theta)-1))) \
                 ) for l in range(len(theta)-1))  \
-                + (G[edge_order[i][0]][edge_order[i][1]]['t_0']) * xr[i]\
+                + (edge_times[i]) * xr[i]\
                 for i in range(N_edges))
-    elif exogenous_G:
+    elif stackelberg:
+        exo_flow = [G[u][v].get("flow") for u, v in edge_order]
         obj = gp.quicksum(\
-                gp.quicksum(G[edge_order[i][0]][edge_order[i][1]]['t_0'] * a[l]/G[edge_order[i][0]][edge_order[i][1]]['capacity'] *( \
-                e[l,i] * (0+gp.quicksum(((theta[k + 1] - theta[k])*G[edge_order[i][0]][edge_order[i][1]]['capacity']) for k in range(0,l))) \
-                + e[l,i] * ((theta[l + 1] - theta[l])*G[edge_order[i][0]][edge_order[i][1]]['capacity'] ) \
-                + (theta[l+1] - theta[l])*G[edge_order[i][0]][edge_order[i][1]]['capacity']*(0+gp.quicksum(e[k,i] for k in range(l+1, len(theta)-1))) \
-                - e[l,i] * exogenous_G[edge_order[i][0]][edge_order[i][1]]['flow'] \
-                ) for l in range(len(theta)-1))  \
-                + (G[edge_order[i][0]][edge_order[i][1]]['t_0']) * xr[i]\
+                gp.quicksum(edge_times[i] * a[l]/capacities[i] *(\
+                e[l,i] * (0+gp.quicksum(((theta[k + 1] - theta[k])*capacities[i]) for k in range(0,l))) \
+                + e[l,i] * ((theta[l + 1] - theta[l])*capacities[i] ) \
+                + (theta[l+1] - theta[l])*capacities[i]*(0+gp.quicksum(e[k,i] for k in range(l+1, len(theta)-1))) \
+                - e[l,i] * exo_flow[i] \
+                )
+                  for l in range(len(theta)-1))  \
+                + (edge_times[i]) * xr[i]\
                 for i in range(N_edges))
+        
     
+    # obj += gp.quicksum(edge_times[i] * x[i,:].sum() for i in range(N_edges))
+
     m.setObjective(obj, GRB.MINIMIZE)
-    if not exogenous_G:
+    if not stackelberg:
         m.addConstrs(e[l,i]\
                     >=  x[i,:].sum() \
                     +  xr[i] \
-                    - theta[l]*G[edge_order[i][0]][edge_order[i][1]]['capacity'] \
+                    - theta[l]*capacities[i] \
                     - gp.quicksum(e[l+k+1,i] for k in range(n-l-1)) for i in range(N_edges) for l in range(n))
-    elif exogenous_G:
+    elif stackelberg:
         m.addConstrs(e[l,i]\
                     >=  x[i,:].sum() \
                     +  xr[i] \
-                    + exogenous_G[edge_order[i][0]][edge_order[i][1]]['flow'] \
-                    - theta[l]*G[edge_order[i][0]][edge_order[i][1]]['capacity'] \
+                    + exo_flow[i] \
+                    - theta[l]*capacities[i] \
                     - gp.quicksum(e[l+k+1,i] for k in range(n-l-1)) for i in range(N_edges) for l in range(n))
     # Demand reshaped to 1D array
-    b = Demands.flatten()
-    I_n  = eye(N_nodes, format="csr")
-    A_x   = kron(I_n,  Binc, format="csc")
-    x_flat = x.reshape(-1)
-    m.addMConstr(A_x, x_flat, '=', b, name="FlowConservation")
-    one_row = csr_matrix(np.ones((1, N_nodes)))
-    A_sum   = kron(one_row, Binc, format="csc")    
-    A_inc   = hstack([A_sum, Binc], format="csc")
-
-    xr_vec   = xr.reshape(-1, 1) # (E,   1)
-    x_column = x_flat.reshape(-1, 1) # (E·N, 1)
-    vars_inc = gp.vstack([x_column, xr_vec]).reshape(-1)
-
-    zero_rhs = np.zeros(N_nodes)
-    m.addMConstr(A_inc, vars_inc, '=', zero_rhs, name="Incidence")
+    for i in range(N_nodes):
+        m.addMConstr(Binc, x[:,i], sense='=', b=Demands[i,:], name=f"DemandBalance_{i}")
+    total_flow = gp.MLinExpr.zeros(N_edges)
+    for i in range(N_nodes):
+        total_flow += x[:,i]
+    total_flow += xr
+    reb_expr = Binc @ total_flow
+    zeros = np.zeros(N_nodes)
+    m.addConstrs((reb_expr[i] == zeros[i] for i in range(N_nodes)), name=f"rebalancing_{i}")
     # Solve the model
+    m.update()
+    m.printStats()
     m.optimize()
     # Extract solution
     x_mat   = x.X
@@ -263,6 +261,5 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
     sol["IndividualTimes"] = 0
     sol["Dem"] = Demands
     m.close()
-    env.close()
     
     return sol

@@ -9,7 +9,7 @@ import pandas as pd
 
 class penrateSimulation(RidePoolingSimulationCore):
     def __init__(self, cfg: SimulationConfig):
-        super().__init__(cfg.core)
+        super().__init__(cfg)
         self.stackelberg:int=0
         self.metrics: Dict[str, List[float]]
         self.tNet_private, self.tstamp, self.fcoeffs = nyc.build_NYC_net(
@@ -19,6 +19,8 @@ class penrateSimulation(RidePoolingSimulationCore):
 
         with open("data/gml/NYC_small_demands.gpickle", 'rb') as f:
             self.g = pickle.load(f)
+        self.g = tnet.perturbDemandConstant(self.g, self.cfg.demand_multiplier/24)
+        self.private_g = tnet.perturbDemandConstant(self.tNet_private.g, self.cfg.demand_multiplier/24)
 
     def _init_penrate_metrics(self):
         keys = [
@@ -27,8 +29,9 @@ class penrateSimulation(RidePoolingSimulationCore):
             "bike_flow",
             "pt_flow",
             "rp_flow",
+            "private_flow",
             "IAMoDCosts",
-            "privateCosts"
+            "privateCosts",
             "totCost"
         ]
         self.penrate_metrics = {k: [] for k in keys}
@@ -38,8 +41,8 @@ class penrateSimulation(RidePoolingSimulationCore):
         self._initialize_networks(pen_rate=penrate)
 
     def _initialize_networks(self, pen_rate):
-        self.tNet.set_g(tnet.perturbDemandConstant(self.g, constant=(1-pen_rate)/24))
-        self.tNet_private.set_g(tnet.perturbDemandConstant(self.g, constant=pen_rate/24))
+        self.tNet.set_g(tnet.perturbDemandConstant(self.g, constant=(1-pen_rate)))
+        self.tNet_private.set_g(tnet.perturbDemandConstant(self.private_g, constant=pen_rate))
 
     def _update_road_edge_costs(self, y: np.ndarray, yr: np.ndarray) -> Tuple[float, float]:
         total_cars = reb_cars = 0.0
@@ -58,8 +61,17 @@ class penrateSimulation(RidePoolingSimulationCore):
             edge['flow'] = flow
             edge['flowRebalancing'] = yr[k]
         return total_cars, reb_cars
+    
+    def add_private_to_rg(self) -> None:
+        """
+        Add private vehicle flows to the original road graph.
+        This is done by updating the edge flows in the original_G with the flows from tNet_private.
+        """
+        for i, j in self.original_G.edges():
+            self.original_G[i][j]['flow'] += self.tNet_private.G[i][j]['flow']
 
     def run_private(self) -> None:
+        self.tNet_private.TAP.n_iter_tm = 500    # limit tap iterations
         self.tNet_private.solveMSA(exogenous_G=self.original_G, verbose=0)   #set verbose 1 for console prints
 
     def log_penrate_results(self, pen_rate)-> None:
@@ -75,6 +87,7 @@ class penrateSimulation(RidePoolingSimulationCore):
         self.penrate_metrics["bike_flow"].append(final_metrics["bike_flow"])
         self.penrate_metrics["pt_flow"].append(final_metrics["pt_flow"])
         self.penrate_metrics["rp_flow"].append(final_metrics["rp_flow"])
+        self.penrate_metrics["private_flow"].append(privateFlow)
         self.penrate_metrics["IAMoDCosts"].append(IAMoDCosts)
         self.penrate_metrics["privateCosts"].append(privateCosts)
         self.penrate_metrics["totCost"].append(totCost)
@@ -86,16 +99,25 @@ class penrateSimulation(RidePoolingSimulationCore):
         logger.info("Metrics saved → %s", self.cfg.results_csv)
 
     
+            
 def main() -> None:
     cfg = SimulationConfig()
-    cfg.vehicle_limit = 1200
+    cfg.max_iterations = 1
+    cfg.vehicle_limit = 1400
+    cfg.mu_initial = 1e-2
+    cfg.stable_needed = 3
+    cfg.demand_multiplier=2
+    cfg.delay_factor= 2 / 60
+    cfg.waiting_time= 2 / 60
+    cfg.results_dir = cfg.results_dir / "penrate"
     sim = penrateSimulation(cfg)
-    for pen_rate in np.linspace(0.01,0.99, 10):
+    for pen_rate in np.linspace(0.01,0.99, 4):
         sim._init_penrate(pen_rate)
-        for stackelberg in range(10):
+        for stackelberg in range(1):
             sim.stackelberg = stackelberg
             sim.run()
             sim.run_private()
+            sim.add_private_to_rg()
         sim.log_penrate_results(pen_rate)
         sim.save_penrate_csv()
             

@@ -5,10 +5,19 @@ from typing import List
 from joblib import Parallel, delayed, cpu_count
 
 from src.solvers import *
-from src.solvers import _build_snapshot, _solve_cars_gurobi
+from src.solvers import _build_snapshot, _solve_cars_gurobi, _solve_cars_gurobi_M
 from src.simConfig import SimulationConfig
 import src.tnet as tnet
 import experiments.build_NYC_subway_net as nyc
+
+### set plot params ###
+from matplotlib import rc
+rc('text', usetex=True)
+plt.rc('axes', labelsize=13)
+plt.rc('legend', fontsize=12)
+plt.rc('xtick', labelsize=15)
+plt.rc('ytick', labelsize=15)
+rc('font',**{'family':'sans-serif','sans-serif':['Helvetica']})
 
 class RidePoolingSimulationCore:
     """Run the fixed-point mode-allocation simulation."""
@@ -22,7 +31,8 @@ class RidePoolingSimulationCore:
         )
         with open("data/gml/NYC_small_demands.gpickle", 'rb') as f:
             self.tNet.g = pickle.load(f)
-        self.tNet.set_g(tnet.perturbDemandConstant(self.tNet.g, 1/24))
+        self.tNet.set_g(tnet.perturbDemandConstant(self.tNet.g, self.cfg.demand_multiplier*1/24))
+        self.tNet.read_node_coordinates("data/pos/NYC.txt")
         self.original_G = self.tNet.G
         # 2.2 Replace road graphs with pre-built pickles ------------------
         self._load_gml_graphs()
@@ -36,6 +46,7 @@ class RidePoolingSimulationCore:
         }
         self._n_nodes = len(self._car_node_idx)
         self._car_node_idx_np = dict_to_lookup(self._car_node_idx)
+        self.stackelberg = 0
 
     # ------------------------------------------------------------------
     # Public driver
@@ -86,6 +97,11 @@ class RidePoolingSimulationCore:
             self._update_supergraph_costs(D_rp, gamma_arr)
             if it == 0:
                 self._record_metrics(demand_split, total_cars, reb_cars)
+
+            if stable_hits >= self.cfg.stable_needed:
+                logger.info("Converged after %d iterations", it + 1)
+                break
+
             logger.info("Completed iteration %d", it + 1)
             r = 1 + self.metrics["double_share"][-1]
         self._save_metrics_csv()
@@ -148,7 +164,7 @@ class RidePoolingSimulationCore:
         snap = getattr(self, "_cars_snapshot", None)
         if snap is None:
             snap = self._cars_snapshot = _build_snapshot(self.tNet)
-        res = _solve_cars_gurobi(self.tNet, snap, params)
+        res = _solve_cars_gurobi_M(self.tNet, snap, params)
         return res.avg_time, res.x_vec, res.expected_cars, res.obj_val
 
     # ---------- OD extraction ----------------------------------------
@@ -181,6 +197,7 @@ class RidePoolingSimulationCore:
             self._ori_car_node_idx,
             self._n_nodes,
             self.original_G,
+            self.stackelberg
         )
 
     # ---------- edge cost update -------------------------------------
@@ -194,6 +211,8 @@ class RidePoolingSimulationCore:
             edge["t_1"] = t0 * (1 + 0.15 * (flow / cap) ** 4)
             total_cars += flow * edge["t_1"]
             reb_cars += yr[k] * edge["t_1"]
+            edge['flow'] = flow
+            edge['flowRebalancing'] = yr[k]
         return total_cars, reb_cars
 
     # ---------- convergence check ------------------------------------
@@ -209,10 +228,11 @@ class RidePoolingSimulationCore:
         stable_hits: int,
     ) -> int:
         if x_prev is not None:
-            if np.linalg.norm(x.sum(axis=1) - x_prev.sum(axis=1)) < self.cfg.tol_x and total_cars - 10 < self.cfg.vehicle_limit:
+            # for the cars, take 2% overhead since we are approaching the solution anyway
+            if np.linalg.norm(x.sum(axis=1) - x_prev.sum(axis=1)) < self.cfg.tol_x and total_cars - 0.02 * total_cars < self.cfg.vehicle_limit:
                 stable_hits += 1
                 logger.info("Δx below tol (hit %d/%d)", stable_hits, self.cfg.stable_needed)
-            elif obj_prev is not None and abs(obj - obj_prev) < self.cfg.tol_obj and total_cars - 10 < self.cfg.vehicle_limit:
+            elif obj_prev is not None and abs(obj - obj_prev) < self.cfg.tol_obj*obj and total_cars - 0.02 * total_cars < self.cfg.vehicle_limit:
                 stable_hits += 1
                 logger.info("Δobj below tol (hit %d/%d)", stable_hits, self.cfg.stable_needed)
             else:
@@ -316,9 +336,9 @@ class RidePoolingSimulationCore:
                 d["t_1"] = d["t_0"]
 
         # also keep a history on the road graph (optional diagnostics) --
-        for u, v in self.tNet.G.edges():
-            e = self.tNet.G[u][v]
-            e["t_2"] = e.get("t_1", e["t_0"])  # shift previous value
+        # for u, v in self.tNet.G.edges():
+        #     e = self.tNet.G[u][v]
+        #     e["t_2"] = e.get("t_1", e["t_0"])  # shift previous value
         del full_list
         gc.collect()
 
@@ -360,24 +380,31 @@ class RidePoolingSimulationCore:
 
     def _plot_mode_share(self) -> None:
         M = self.metrics
-        plt.figure()
+        fig, ax1 = plt.subplots()
         x = np.arange(len(self.metrics["single_share"]))
-        solo = [M["single_share"][i]*M['rp_flow'][i] for i in range(len(M["single_share"]))]
-        plt.bar(x, solo, label="Solo rides")
-        bottom=solo
-        duo = [M["double_share"][i]*M['rp_flow'][i] for i in range(len(M["single_share"]))]
-        plt.bar(x, duo, bottom=bottom, label="Matched rides")
-        bottom=[duo[i] + solo[i] for i in range(len(duo))]
-        plt.bar(x, M['pt_flow'], bottom=bottom, label="Public transporation")
-        bottom=[duo[i] + solo[i] + M['pt_flow'][i] for i in range(len(duo))]
-        plt.bar(x, M['bike_flow'], bottom=bottom, label="Biking")
-        bottom=[duo[i] + solo[i] + M['pt_flow'][i] + M['bike_flow'][i] for i in range(len(duo))]
-        plt.bar(x, M['ped_flow'], bottom=bottom, label="Walking")        
-        plt.xlabel("Iteration")
-        plt.ylabel("User hours travelled")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(f"results/mode_share.eps", format='eps')
+        color = 'tab:blue'
+        rp = M["rp_flow"]
+        ax1.bar(x, rp, label="ride-pooling")
+        bottom=rp
+        ax1.bar(x, M['pt_flow'], bottom=bottom, label="Public transporation")
+        bottom=[rp[i] + M['pt_flow'][i] for i in range(len(rp))]
+        ax1.bar(x, M['bike_flow'], bottom=bottom, label="Biking")
+        bottom=[rp[i] + M['pt_flow'][i] + M['bike_flow'][i] for i in range(len(rp))]
+        ax1.bar(x, M['ped_flow'], bottom=bottom, label="Walking")  
+        bottom = [rp[i] + M['pt_flow'][i] + M['bike_flow'][i] + M['ped_flow'][i] for i in range(len(rp))]
+        ax1.set_xlabel("Iteration")
+        ax1.set_ylabel("User hours travelled", color=color)
+        ax1.tick_params(axis='y', labelcolor=color)
+        ax1.set_ylim([0,max(bottom)+2000])
+        ax2 = ax1.twinx()
+        color = 'tab:red'
+        ax2.set_ylabel(r"[\%] of rp requests pooled", color=color)
+        ax2.plot(x, M["double_share"], color=color, marker = 'o')
+        ax2.tick_params(axis='y', labelcolor=color)
+        ax2.set_ylim([0.8,1.2])
+        fig.legend(loc='upper right')
+        fig.tight_layout()
+        fig.savefig(f"results/mode_share.pdf", format='pdf')
 
 
     # ---------- CSV output --------------------------------------------
@@ -386,5 +413,5 @@ class RidePoolingSimulationCore:
         import pandas as pd
 
         df = pd.DataFrame(self.metrics)
-        df.to_csv(self.cfg.results_csv// f"results_{self.cfg.city_tag}.csv", index=False)
+        df.to_csv(self.cfg.results_csv / f"results_{self.cfg.city_tag}.csv", index=False)
         logger.info("Metrics saved → %s", self.cfg.results_csv)

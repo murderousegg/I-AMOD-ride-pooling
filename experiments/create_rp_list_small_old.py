@@ -10,13 +10,13 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 from scipy import io
 import networkx as nx
-from src.LTIFM2_SP import LTIFM2_SP, LTIFM2_SP_dests
+from src.LTIFM2_SP import LTIFM2_SP
 import os
 import src.tnet as tnet
 from gurobipy import *
 import experiments.build_NYC_subway_net as nyc
 import pickle
-import re
+import time
 
 CITY_FOLDER = "NYC"
 WAITINGTIME = 2/60
@@ -28,7 +28,6 @@ with open("data/gml/NYC_small_roadgraph.gpickle", 'rb') as f:
     G_roadgraph = pickle.load(f)
 
 car_node_order = list(G_roadgraph.nodes())
-car_idx_map = {n: i for i, n in enumerate(car_node_order)}
 Binc_road = nx.incidence_matrix(G_roadgraph)
 [N_nodes_road,N_edges_road] = Binc_road.shape
 
@@ -60,11 +59,11 @@ def A1_SP():
     for ii in tqdm(range(N_nodes_road), desc="Processing ii values")
 )
     for ii, row in results_nested:
-        solPart[:, ii] = row
+        solPart[ii, :] = row
     np.save(f"{CITY_FOLDER}/solPart_pyth_{CITY_FOLDER}.npy", solPart)
     return solPart
 
-def compute_LinearComb2_for_jj1(jj1, N_nodes, solPart, dests):
+def compute_LinearComb2_for_jj1(jj1, N_nodes, solPart):
     """
     This function computes the minimum cost combinations for travel paths within a transportation network.
     This can be wrapped by a parallel processing toolbox such as joblib.
@@ -84,18 +83,14 @@ def compute_LinearComb2_for_jj1(jj1, N_nodes, solPart, dests):
     sol2_LC = np.zeros([75*N_nodes*N_nodes,11]);  
     counter=0
     #loops for exploring all combinations
-    for ii1 in range(0,len(dests)):
-        for ii2 in range(ii1, len(dests)):
+    for ii1 in range(0,N_nodes):
+        for ii2 in range(ii1,N_nodes):
             for jj2 in range(jj1,N_nodes):
                 # only calculate when start and ends are not the same
-                o1 = car_node_order[jj1]
-                o2 = car_node_order[jj2]
-                d1 = dests[ii1]
-                d2 = dests[ii2]
-                if not np.any([d2 == o2, d1 == o1, d1==o2, d2==o1]):
+                if not np.any([ii2 == jj2, ii1 == jj1, ii1==jj2, ii2==jj1]):
                     # find the minimum cost for combination
-                    opti = np.array([LTIFM2_SP_dests(jj1,ii1,jj2,ii2,solPart, car_node_order, dests),
-                                    LTIFM2_SP_dests(jj2,ii2,jj1,ii1,solPart, car_node_order, dests)])
+                    opti = np.array([LTIFM2_SP(jj1,ii1,jj2,ii2,solPart, car_node_order),
+                                    LTIFM2_SP(jj2,ii2,jj1,ii1,solPart, car_node_order)])
                     opti = opti[np.lexsort(opti[:, ::-1].T)]
                     if opti[0,0] != 0 and opti[0,2]<=0.15 and opti[0,1]<=0.15:
                         sol2_LC[counter,:] = opti[0,:]
@@ -110,7 +105,7 @@ def compute_LinearComb2_for_jj1(jj1, N_nodes, solPart, dests):
     return sol2_LC
     
 
-def A2_LinearComb2(solPart, dests):
+def A2_LinearComb2(solPart):
     """
     This function prepares the directory structure, sets up parallel processing, and calls 
     `compute_LinearComb2_for_jj1` to compute minimum-cost path combinations for each starting node.
@@ -134,11 +129,11 @@ def A2_LinearComb2(solPart, dests):
 
     #using joblib:
     results = Parallel(n_jobs=-1)(
-        delayed(compute_LinearComb2_for_jj1)(jj1, N_nodes_road, solPart, dests)
+        delayed(compute_LinearComb2_for_jj1)(jj1, N_nodes_road, solPart)
         for jj1 in tqdm(range(N_nodes_road), desc="Processing jj1 values")
     )
     #store total in .mat file
-    sol2_LC_arr = np.vstack(results).astype(np.float32)
+    sol2_LC_arr = np.asarray([val for row in results for val in row], dtype=np.float32)
     sol2_LC_arr[:, 0] /= 2
     sol2_LC_arr = sol2_LC_arr[sol2_LC_arr[:, 0].argsort()]
     sol2_LC_arr = sol2_LC_arr[sol2_LC_arr[:, 0] < -0.001]
@@ -146,18 +141,10 @@ def A2_LinearComb2(solPart, dests):
 
 def main():
     # create costs matrix
-    with open("data/gml/NYC_small_demands.gpickle", 'rb') as f:
-            g = pickle.load(f)
-    dests = []
-    for (u,v) in g.keys():
-        v_int = int(re.sub(r'\D', '', v))
-        if v_int not in dests:
-            dests.append(v_int)
-    
     solPart = A1_SP()
     # # # ### create solutions for different amount of linear combinations
     # solPart = np.load(f"{CITY_FOLDER}/solPart_pyth_{CITY_FOLDER}.npy", allow_pickle=True)
-    A2_LinearComb2(solPart, dests)
+    A2_LinearComb2(solPart)
    
 
 if __name__ == "__main__":

@@ -97,31 +97,26 @@ class tNet():
             G.add_edge(j, i, length=self.G[i][j]['length'])
         self.G_pedestrian = G
 
-    def _edges_for_origin(self, i: int, G_road: nx.Graph, all_nodes: list[int]) -> list[tuple]:
+    def _edges_for_origin(self, i: int, G_road: nx.Graph, dest_list: list[int]) -> list[tuple]:
         edges = []
 
         # 1. walk → RPo connector
-        edges.append((f"{i}'", f"{i}rpo", {
-            "t_0": 10/3600, "length": 100, "capacity": 10_000, "type": "frpo"
+        edges.append((f"{i}'", f"{i}rp", {
+            "t_0": 3/60, "length": 100, "capacity": 10_000, "type": "frp"
         }))
 
-        # 2. RPo → RPd ride-pool arcs  (to every potential destination j ≠ i)
-        for j in all_nodes:
+        # 2. RP → d
+        for j in dest_list:
             if j == i:
                 continue
-            t0 = nx.shortest_path_length(G_road, source=i, target=j, weight="t_0")
-            edges.append((f"{i}rpo", f"{j}rpd", {
+            t0 = nx.shortest_path_length(G_road, source=i, target=int(j[:-2]), weight="t_0")
+            edges.append((f"{i}rp", j, {
                 "t_0": t0, "length": 100, "capacity": 10_000, "type": "rp"
             }))
 
         return edges
 
-    def _edges_for_destination(self, j: int) -> tuple:
-        return (f"{j}rpd", f"{j}''", {
-            "t_0": 10/3600, "length": 0.1, "capacity": 10_000, "type": "frpd"
-        })
-
-    def build_rp_layers(self, G_roadgraph):
+    def build_rp_layers(self, G_roadgraph, dest_list):
         """
         Adds three-layer ride-pool structure to tNet.G_supergraph in-place.
         """
@@ -130,15 +125,15 @@ class tNet():
 
         # --- 1. parallel origin processing --------------------------------
         origin_edge_lists = Parallel(n_jobs=-1)(
-            delayed(self._edges_for_origin)(i, self.G, road_nodes) for i in road_nodes
+            delayed(self._edges_for_origin)(i, self.G, dest_list) for i in road_nodes
         )
         for elist in origin_edge_lists:
             G2.add_edges_from(elist)
 
-        # --- 2. destination connectors ------------------------------------
-        for j in road_nodes:
-            u, v, attr = self._edges_for_destination(j)
-            G2.add_edge(u, v, **attr)
+        # # --- 2. destination connectors ------------------------------------
+        # for j in road_nodes:
+        #     u, v, attr = self._edges_for_destination(j)
+        #     G2.add_edge(u, v, **attr)
         self.G_supergraph=G2
 
     def build_layer(self, one_way=True, avg_speed=3.1 ,capacity=99999, symb="'", identical_G=False):
@@ -158,12 +153,12 @@ class tNet():
         G2 = self.G_supergraph.copy()
         if identical_G == False:
             if one_way == True:
-                [G2.add_edge(str(i) + symb, str(j) + symb, length=self.G[i][j]['length'], t_0=self.G[i][j]['length'] / avg_speed, capacity=capacity, type=symb) for i, j in self.G.edges() if isinstance(i, int) == True and isinstance(j, int)]
+                [G2.add_edge(str(i) + symb, str(j) + symb, length=self.G[i][j]['length'], t_0=self.G[i][j]['length'] * 1.6 / avg_speed , capacity=capacity, type=symb) for i, j in self.G.edges() if isinstance(i, int) == True and isinstance(j, int)]
             else:
-                [G2.add_edge(str(i) + symb, str(j) + symb, length=self.G[i][j]['length'], t_0=self.G[i][j]['length'] / avg_speed, capacity=capacity, type=symb) for i, j in self.G.edges() if isinstance(i, int) == True and isinstance(j, int)]
-                [G2.add_edge(str(j) + symb, str(i) + symb, length=self.G[i][j]['length'], t_0=self.G[i][j]['length'] / avg_speed, capacity=capacity, type=symb) for i, j in self.G.edges() if isinstance(i, int) == True and isinstance(j, int)]
-            [G2.add_edge(str(i) + "'", str(i) + symb, t_0=10/60/60, capacity=capacity, type='f' + symb, length=0.1) for i in self.G.nodes()]
-            [G2.add_edge(str(i) + symb, str(i) + "'", t_0=10/60/60, capacity=capacity, type='f' + symb, length=0.1) for i in self.G.nodes()]
+                [G2.add_edge(str(i) + symb, str(j) + symb, length=self.G[i][j]['length'], t_0=self.G[i][j]['length'] * 1.6 / avg_speed , capacity=capacity, type=symb) for i, j in self.G.edges() if isinstance(i, int) == True and isinstance(j, int)]
+                [G2.add_edge(str(j) + symb, str(i) + symb, length=self.G[i][j]['length'], t_0=self.G[i][j]['length'] * 1.6 / avg_speed , capacity=capacity, type=symb) for i, j in self.G.edges() if isinstance(i, int) == True and isinstance(j, int)]
+            [G2.add_edge(str(i) + "'", str(i) + symb, t_0=3/60, capacity=capacity, type='f' + symb, length=0.1) for i in self.G.nodes()]
+            [G2.add_edge(str(i) + symb, str(i) + "'", t_0=3/60, capacity=capacity, type='f' + symb, length=0.1) for i in self.G.nodes()]
         self.G_supergraph = G2
 
     def build_walking_supergraph(self, walk_multiplier=1, identical_G=False):
@@ -184,14 +179,12 @@ class tNet():
         if identical_G == False:
             for i, j in self.G.edges():
                 G2.add_edge(str(i) + "'", str(j) + "'", length=self.G[i][j]['length'],
-                            t_0=self.G[i][j]['length'] / 3.1 / walk_multiplier, capacity=10000, type='p')
+                            t_0=self.G[i][j]['length'] * 1.6 / 4.8 / walk_multiplier, capacity=10000, type='p')
                 G2.add_edge(str(j) + "'", str(i) + "'", length=self.G[i][j]['length'],
-                            t_0=self.G[i][j]['length'] / 3.1 / walk_multiplier, capacity=10000, type='p')
+                            t_0=self.G[i][j]['length'] * 1.6 / 4.8 / walk_multiplier, capacity=10000, type='p')
         for i in self.G.nodes():
             G2.add_edge(str(i) + "'", str(i) + "''", length=0.1,
                                t_0=1/3600, capacity=10000, type='pd')
-                        
-                
         self.G_supergraph = G2
 
     def add_layer(self, layer, layer_symb, speed=False):
@@ -213,18 +206,17 @@ class tNet():
             for i,j in layer.edges():
                 G2.add_edge(str(i) + layer_symb, str(j) + layer_symb, length=layer[i][j]['length'],
                            t_0=layer[i][j]['t_0'], capacity=layer[i][j]['capacity'], type=layer_symb)
-                G2.add_edge(f"{i}'", str(i) + layer_symb, t_0=10/60/60, capacity=99999, type='f', length=0.1)
-                G2.add_edge(str(i) + layer_symb, f"{i}'", t_0=10/60/60, capacity=99999, type='f', length=0.1)
-                G2.add_edge(f"{j}'", str(j) + layer_symb, t_0=10/60/60, capacity=99999, type='f', length=0.1)
-                G2.add_edge(str(j) + layer_symb, f"{j}'", t_0=10/60/60, capacity=99999, type='f', length=0.1)
+            for i in layer.nodes():
+                G2.add_edge(f"{i}'", str(i) + layer_symb, t_0=5/60, capacity=99999, type='f', length=0.1)
+                G2.add_edge(str(i) + layer_symb, f"{i}'", t_0=1/60, capacity=99999, type='f', length=0.1)
         else:
             for i, j in layer.edges():
                 G2.add_edge(str(i) + layer_symb, str(j) + layer_symb, length=layer[i][j]['length'],
                             t_0=layer[i][j]['t_0']/speed, capacity=layer[i][j]['capacity'], type=layer_symb)
-                G2.add_edge(i, str(i) + layer_symb, t_0=10/60/60, capacity=99999, type='f', length=0.1)
-                G2.add_edge(str(i) + layer_symb, i, t_0=10/60/60, capacity=99999, type='f', length=0.1)
-                G2.add_edge(j, str(j) + layer_symb, t_0=10/60/60, capacity=99999, type='f', length=0.1)
-                G2.add_edge(str(j) + layer_symb, j, t_0=10/60/60, capacity=99999, type='f', length=0.1)
+                G2.add_edge(i, str(i) + layer_symb, t_0=8/60, capacity=99999, type='f', length=0.1)
+                G2.add_edge(str(i) + layer_symb, i, t_0=8/60, capacity=99999, type='f', length=0.1)
+                G2.add_edge(j, str(j) + layer_symb, t_0=8/60, capacity=99999, type='f', length=0.1)
+                G2.add_edge(str(j) + layer_symb, j, t_0=8/60, capacity=99999, type='f', length=0.1)
         self.G_supergraph = G2
         return self.G_supergraph
 
@@ -1087,6 +1079,10 @@ def get_network_parameters(net_name, experiment_name='_'):
     elif net_name == 'ChicagoSketch':
         netFile = "data/net/ChicagoSketch_net.txt"
         gFile = "data/trips/ChicagoSketch_trips.txt"
+        fcoeffs = [1, 0, 0, 0, 0.15, 0]
+    elif net_name == "NYC":
+        netFile = "data/net/NYC/NYC_M_Road_net.txt"
+        gFile = "data/trips/NYC_trips.txt"
         fcoeffs = [1, 0, 0, 0, 0.15, 0]
     tstamp = datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
     dir_out = tstamp + "_"+ experiment_name

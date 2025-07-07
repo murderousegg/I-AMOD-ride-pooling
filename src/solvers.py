@@ -13,6 +13,8 @@ from tqdm import tqdm
 import gurobipy as gp
 from gurobipy import GRB, LinExpr, QuadExpr, quicksum
 from src.LTIFM_reb import LTIFM_reb_sparse
+import warnings
+warnings.filterwarnings("ignore", message=".*Chained matrix multiplications of MVars is inefficient.*")
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
@@ -76,6 +78,7 @@ class SolverParams:
     method: int = -1  # Gurobi Method param
     threads: int | None = None
     r: float = 2
+    Tmax: float = 0.5
 
 @dataclass
 class NetSnapshot:
@@ -186,7 +189,7 @@ def _build_objective(tnet, snap: NetSnapshot, x, params: SolverParams):
 
     # --- remove prox if not requested ---------------------------------
     if params.mu <= 0 or params.prev_x is None:
-        return base_obj
+        return base_obj, 0
 
     # --- diagonal (sparse) prox term ----------------------------------
     prox = QuadExpr()
@@ -199,10 +202,12 @@ def _build_objective(tnet, snap: NetSnapshot, x, params: SolverParams):
             diff = x[i, j] - float(prev[i, j])
             prox.add(diff * diff)
 
-    return base_obj + half_mu * prox
+    return (base_obj, half_mu * prox)
 
 @timeit
 def _solve_cars_gurobi(tnet, snap: NetSnapshot, params: SolverParams) -> CARSResult:
+    #TODO: Use Mvars to optimize creating constraints/objectives. Got this to work in the rp
+    #solver, but not here.
     m = gp.Model(f"CARS{params.iteration}")
     _configure_gurobi(m, params)
 
@@ -218,7 +223,8 @@ def _solve_cars_gurobi(tnet, snap: NetSnapshot, params: SolverParams) -> CARSRes
     _add_modal_constraints(m, snap, x)
 
     # objective -------------------------------------------------------
-    m.setObjective(_build_objective(tnet, snap, x, params), GRB.MINIMIZE)
+    base_obj, mu_obj = _build_objective(tnet, snap, x, params)
+    m.setObjective(base_obj + mu_obj, GRB.MINIMIZE)
     
     @timeit
     def _perform_opt():
@@ -233,7 +239,7 @@ def _solve_cars_gurobi(tnet, snap: NetSnapshot, params: SolverParams) -> CARSRes
 
     flows = x_mat.sum(axis=1)
     prev_mat = x_mat
-    obj = m.ObjVal
+    obj = base_obj.getValue()
     cars_expected = expr.getValue()
     # write flows back for downstream code
     for i, (u, v) in enumerate(snap.edge_order):
@@ -242,13 +248,102 @@ def _solve_cars_gurobi(tnet, snap: NetSnapshot, params: SolverParams) -> CARSRes
     m.dispose()
     return CARSResult(avg_time=[0.0], x_vec=prev_mat, expected_cars=cars_expected, obj_val=obj)
 
+@timeit
+def _build_objective_fair(tnet, snap: NetSnapshot, x, eps, params: SolverParams):
+    edge_times = [
+        tnet.G_supergraph[u][v].get("t_0" if params.iteration == 0 else "t_1")
+        for u, v in snap.edge_order
+    ]
+    base_obj = quicksum(edge_times[i] * x.sum(i, "*") for i in range(snap.N_edges))
+
+    suff_obj = quicksum(eps[i]*alpha for i, alpha in enumerate(tnet.g.values()))
+
+    # --- remove prox if not requested ---------------------------------
+    if params.mu <= 0 or params.prev_x is None:
+        return suff_obj + 0.0005*base_obj
+
+    # --- diagonal (sparse) prox term ----------------------------------
+    prox = QuadExpr()
+    half_mu = 0.5 * params.mu
+    n_o = len(snap.origins)
+    prev = params.prev_x.reshape(snap.N_edges, n_o)   # ensure 2-D
+
+    for i in range(snap.N_edges):
+        for j in range(n_o):
+            diff = x[i, j] - float(prev[i, j])
+            prox.add(diff * diff)
+
+    return suff_obj + 0.0005*base_obj + half_mu * prox
+
+def _add_sufficiency_constraints(tnet, m, x, eps, Tmax, iter):
+    expr = []
+    if iter == 0:
+        times = [float(tnet.G_supergraph[u][v]['t_0']) for u,v in tnet.G_supergraph.edges()]
+        for idx,(w,d) in enumerate(tnet.g.items()):
+            expr.append(quicksum(times[k] * x[k, idx]\
+                                            for k in range(len(times)))/d)
+            m.addConstr(eps[idx] >= expr[-1] - Tmax)
+    elif iter > 0:
+        times = [float(tnet.G_supergraph[u][v]['t_1']) for u,v in tnet.G_supergraph.edges()]
+        for idx,(w,d) in enumerate(tnet.g.items()):
+            expr.append(quicksum(times[k] * x[k, idx]\
+                                            for k in range(len(times)))/d)
+            m.addConstr(eps[idx] >= expr[-1] - Tmax)
+    return expr
+    
+
+@timeit
+def _solve_cars_gurobi_fair(tnet, snap: NetSnapshot, params: SolverParams) -> CARSResult:
+    m = gp.Model(f"CARS{params.iteration}")
+    _configure_gurobi(m, params)
+
+    # variables -------------------------------------------------------
+    x = m.addVars(snap.N_edges, tnet.g.keys(), name="x", lb=0)
+    xr = None
+    if params.rebalancing and params.iteration == 0:
+        xr = m.addVars(snap.N_edges, name="xr", lb=0)
+    eps = m.addVars(len(tnet.g.keys()), lb=0, vtype=GRB.CONTINUOUS, name='eps')
+    # constraints -----------------------------------------------------
+    _add_flow_conservation(m, snap, x, xr, params)
+    expr = _add_vehicle_cap(m, tnet, snap, x, xr, params)
+    _add_modal_constraints(m, snap, x)
+    expr_suff = _add_sufficiency_constraints(m, snap, x, eps, params.Tmax, params.iteration)
+
+    # objective -------------------------------------------------------
+    m.setObjective(_build_objective_fair(tnet, snap, x, params), GRB.MINIMIZE)
+    
+    @timeit
+    def _perform_opt():
+        m.optimize()
+    _perform_opt()
+
+    x_vars = list(x.values())
+    x_vals = m.getAttr("X", x_vars)
+
+    x_mat  = np.asarray(x_vals, dtype=float)\
+                .reshape(snap.N_edges, len(tnet.g.keys()), order="C")
+
+    flows = x_mat.sum(axis=1)
+    prev_mat = x_mat
+    obj = m.ObjVal
+    cars_expected = expr.getValue()
+    avg_time_suff = []
+    for i,(w,d) in enumerate(tnet.g.items()):
+        avg_time_suff.append(expr_suff[i].getValue())
+    # write flows back for downstream code
+    for i, (u, v) in enumerate(snap.edge_order):
+        tnet.G_supergraph[u][v]["flowNoRebalancing"] = flows[i]
+
+    m.dispose()
+    return CARSResult(avg_time=avg_time_suff, x_vec=prev_mat, expected_cars=cars_expected, obj_val=obj)
+
 ###############################################################################
 # 0. Functional helper: compute_results                                        #
 ###############################################################################
 def _pad_to_full(mat_small: np.ndarray,
                  idx_small: Dict[int, int],
                  idx_full: Dict[int, int]) -> np.ndarray:
-    """Return |full|×|full| matrix with `mat_small` dropped in the right block."""
+    """Return |full|x|full| matrix with `mat_small` dropped in the right block."""
     full = np.zeros((len(idx_full), len(idx_full)), dtype=mat_small.dtype)
     rows = np.array([idx_full[n]                    # position in big ordering
                      for n, _ in sorted(idx_small.items(),
@@ -273,6 +368,7 @@ def compute_results(
     original_index_map: Dict[int, int],
     n_nodes_road: int,
     road_graph: nx.DiGraph,
+    stackelberg: int
 ) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float, float], np.ndarray]:
     """Split ride-pool OD matrix into solo / pooled parts & run LTIFM."""
 
@@ -311,7 +407,7 @@ def compute_results(
     is_1212  = is_1212[keep]
     gamma_compact = np.zeros(len(jj1_arr), dtype=np.float32)
     
-    for idx in tqdm(range(delay1.shape[0]), desc="γ-updates", unit="pair", mininterval=5):
+    for idx in tqdm(range(delay1.shape[0]), desc="gamma-updates", unit="pair", mininterval=5):
         jj1, ii1 = jj1_arr[idx], ii1_arr[idx]
         jj2, ii2 = jj2_arr[idx], ii2_arr[idx]
 
@@ -353,21 +449,145 @@ def compute_results(
     np.fill_diagonal(full_solo_demand,   0)
     np.fill_diagonal(full_pooled_demand, 0)
     full_demand = full_solo_demand + full_pooled_demand
+    np.save("full_demand.npy", full_demand)
     # LTIFM per class ----------------------------------------------------
-    sol_np = LTIFM_reb_sparse(full_demand, road_graph, fcoeffs=fcoeffs)
+    sol_np = LTIFM_reb_sparse(full_demand, road_graph, fcoeffs=fcoeffs, stackelberg=stackelberg)
 
     full_demand -= np.diag(np.diag(full_demand))
     
-    y = sol_np["x"]
+    y = sol_np["x"] 
     yr = sol_np["xr"]
-
-
-
+    non_pooled_perc = np.sum(full_solo_demand)/(np.sum(original_demand))
     demand_stats = (
         float(original_demand.sum()),
         float(solo_demand.sum()),
         float(pooled_demand.sum()),
-        np.sum(full_solo_demand)/(np.sum(full_solo_demand) + np.sum(full_pooled_demand)),
-        np.sum(full_pooled_demand)/(np.sum(full_solo_demand) + np.sum(full_pooled_demand))
+        non_pooled_perc,
+        1-non_pooled_perc
     )
     return y, yr, demand_stats, gamma_arr
+
+
+@timeit
+def _add_flow_conservation_M(m: gp.Model, snap: NetSnapshot, x, xr, params: SolverParams) -> LinExpr:
+    for i in range(len(snap.origins)):
+        m.addMConstr(snap.Binc, x[:,i], sense='=', b=snap.demand_matrix[i,:], name=f"DemandBalance_{i}")
+
+@timeit
+def _add_vehicle_cap_M(m: gp.Model, tnet, snap: NetSnapshot, x, xr, params: SolverParams):
+    tvals = []
+    idxs = []
+    for j, (u, v) in enumerate(snap.edge_order):
+        if "rp" in str(u):
+            t = tnet.G_supergraph[u][v]["t_0"] if params.iteration == 0 else tnet.G_supergraph[u][v]["t_cars"]
+            tvals.append(t)
+            idxs.append(j)
+
+    t_array = np.array(tvals)
+    x_rp = x[idxs, :]
+    expr = (t_array @ x_rp).sum()
+
+    if xr is not None and params.iteration == 0:
+        expr += (t_array @ xr[idxs])
+        
+    if params.iteration == 0:
+        m.addConstr(expr <= params.vehicle_limit * params.r)  # r default 2
+    else:
+        expr = expr / params.r + params.reb_cars
+        m.addConstr(expr * params.c_ratio <= params.vehicle_limit)
+    return expr
+
+@timeit
+def _add_modal_constraints_M(m: gp.Model, snap: NetSnapshot, x):
+    """Implements the zero-flow rules for walk→bike connectors."""
+    switching_idx = []
+    o = []
+    for i, (u, v) in enumerate(snap.edge_order):
+        u_str, v_str = str(u), str(v)
+        if "'" in u_str and "b" in v_str:
+            switching_idx.append(i)
+            o.append(s2int(u_str))
+    switching_idx = np.array(switching_idx, dtype=int)
+    o = np.array(o, dtype=int)
+    #TODO: pre-store boolean array for biking constraint, calcuate once
+    for i, u in enumerate(snap.origins):
+        not_o = np.nonzero(o != s2int(u))
+        true_switching_idx = switching_idx[not_o[0]]
+        x_switch = x[true_switching_idx,i]
+        m.addConstr(x_switch == 0,
+                    name=f"ModalConstraints_{i}")  # zero flow for all non-matching origins
+        
+
+@timeit
+def _build_objective_M(tnet, snap: NetSnapshot, x: gp.MVar, params: SolverParams):
+    edge_times = np.array([
+        tnet.G_supergraph[u][v].get("t_0" if params.iteration == 0 else "t_1")
+        for u, v in snap.edge_order
+    ])
+    base_obj = edge_times @ x.sum(axis=1)
+
+    if params.mu <= 0 or params.prev_x is None:
+        return base_obj, 0
+
+    n_o = len(snap.origins)
+    prev = params.prev_x.reshape(snap.N_edges, n_o)
+
+    prox_expr = QuadExpr()
+
+    # Flatten x and prev to 1D arrays
+    x_flat = x.reshape(-1).tolist()
+    prev_flat = prev.reshape(-1)
+
+    # Quadratic terms: (x_ij)^2
+    prox_expr.addTerms([1.0] * len(x_flat), x_flat, x_flat)
+
+    # Linear terms: -2 * prev_ij * x_ij
+    prox_expr.addTerms((-2.0 * prev_flat).tolist(), x_flat)
+
+    # Constant term: sum(prev_ij^2)
+    prox_expr.addConstant((prev_flat ** 2).sum())
+
+    # Scale the entire expression
+    prox_expr *= 0.5 * params.mu
+
+    return base_obj, prox_expr
+
+@timeit
+def _solve_cars_gurobi_M(tnet, snap: NetSnapshot, params: SolverParams) -> CARSResult:
+    #TODO: Use Mvars to optimize creating constraints/objectives. Got this to work in the rp
+    #solver, but not here.
+    m = gp.Model(f"CARS{params.iteration}")
+    _configure_gurobi(m, params)
+
+    # variables -------------------------------------------------------
+    x = m.addMVar((snap.N_edges, len(snap.origins)), name="x", lb=0)
+    xr = None
+    if params.rebalancing and params.iteration == 0:
+        xr = m.addMVar(snap.N_edges, name="xr", lb=0)
+
+    # constraints -----------------------------------------------------
+    _add_flow_conservation_M(m, snap, x, xr, params)
+    expr = _add_vehicle_cap_M(m, tnet, snap, x, xr, params)
+    _add_modal_constraints_M(m, snap, x)
+
+    # objective -------------------------------------------------------
+    base_obj, mu_obj = _build_objective_M(tnet, snap, x, params)
+    m.setObjective(base_obj + mu_obj, GRB.MINIMIZE)
+    
+    @timeit
+    def _perform_opt():
+        m.optimize()
+    _perform_opt()
+
+    x_mat  = x.X
+
+    flows = x_mat.sum(axis=1)
+    prev_mat = x_mat
+    obj = base_obj.getValue()
+    cars_expected = expr.getValue()
+    # write flows back for downstream code
+    for i, (u, v) in enumerate(snap.edge_order):
+        tnet.G_supergraph[u][v]["flowNoRebalancing"] = flows[i]
+
+    m.dispose()
+    return CARSResult(avg_time=[0.0], x_vec=prev_mat, expected_cars=cars_expected, obj_val=obj)

@@ -7,10 +7,12 @@ class SimulationConfig:
 
     city_root: Path = Path("data")
     city_tag: str = "NYC"
-    waiting_time: float = 10 / 60  # h
-    delay_factor: float = 10/60
+    waiting_time: float = 3 / 60  # h
+    delay_factor: float = 3 / 60
     vehicle_limit: int = 10_000
     max_iterations: int = 21
+    demand_multiplier: float = 1
+    Tmax:float=0.5
 
     # adaptive-µ controls
     mu_initial: float = 1e-4
@@ -20,9 +22,9 @@ class SimulationConfig:
     s_low: float = 0.4
 
     # convergence & smoothing
-    gamma_cars: float = 0.5  # EMA smoothing factor
+    gamma_cars: float = 0.3  # EMA smoothing factor
     tol_x: float = 1.0       # ‖xₖ − xₖ₋₁‖
-    tol_obj: float = 10.0
+    tol_obj: float = 0.01    # 1%
     stable_needed: int = 3   # consecutive hits
 
     # output
