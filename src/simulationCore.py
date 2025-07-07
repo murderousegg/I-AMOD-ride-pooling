@@ -380,20 +380,21 @@ class RidePoolingSimulationCore:
 
     def _plot_mode_share(self) -> None:
         M = self.metrics
+        bar_colors = plt.get_cmap("tab10").colors
         fig, ax1 = plt.subplots()
         x = np.arange(len(self.metrics["single_share"]))
         color = 'tab:blue'
         rp = M["rp_flow"]
-        ax1.bar(x, rp, label="ride-pooling")
+        ax1.bar(x, rp, label="ride-pooling", color=bar_colors[0])
         bottom=rp
-        ax1.bar(x, M['pt_flow'], bottom=bottom, label="Public transporation")
+        ax1.bar(x, M['pt_flow'], bottom=bottom, label="Public transporation", color=bar_colors[1])
         bottom=[rp[i] + M['pt_flow'][i] for i in range(len(rp))]
-        ax1.bar(x, M['bike_flow'], bottom=bottom, label="Biking")
+        ax1.bar(x, M['bike_flow'], bottom=bottom, label="Biking",corlor=bar_colors[2])
         bottom=[rp[i] + M['pt_flow'][i] + M['bike_flow'][i] for i in range(len(rp))]
-        ax1.bar(x, M['ped_flow'], bottom=bottom, label="Walking")  
+        ax1.bar(x, M['ped_flow'], bottom=bottom, label="Walking", color=bar_colors[3])  
         bottom = [rp[i] + M['pt_flow'][i] + M['bike_flow'][i] + M['ped_flow'][i] for i in range(len(rp))]
         ax1.set_xlabel("Iteration")
-        ax1.set_ylabel("User hours travelled", color=color)
+        ax1.set_ylabel(r"Time-based Modal Share ($\mathrm{h}$)", color=color)
         ax1.tick_params(axis='y', labelcolor=color)
         ax2 = ax1.twinx()
         color = 'tab:red'
