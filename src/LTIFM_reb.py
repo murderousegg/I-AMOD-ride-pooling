@@ -168,7 +168,7 @@ def LTIFM_reb(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, exogeno
     return sol
 
 
-def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, stackelberg=False):
+def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, nash=False):
     node_order = list(G.nodes())
     edge_order = list(G.edges())
 
@@ -194,7 +194,7 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
     # Set up objective
     edge_times = [G[u][v].get("t_0") for u, v in edge_order]
     capacities = [G[u][v].get("capacity") for u, v in edge_order]
-    if not stackelberg:
+    if not nash:
         obj = gp.quicksum(\
                 gp.quicksum(edge_times[i] * a[l]/capacities[i] *( \
                 e[l,i] * (0+gp.quicksum(((theta[k + 1] - theta[k])*capacities[i]) for k in range(0,l))) \
@@ -203,7 +203,7 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
                 ) for l in range(len(theta)-1))  \
                 + (edge_times[i]) * xr[i]\
                 for i in range(N_edges))
-    elif stackelberg:
+    elif nash:
         exo_flow = [G[u][v].get("flow") for u, v in edge_order]
         obj = gp.quicksum(\
                 gp.quicksum(edge_times[i] * a[l]/capacities[i] *(\
@@ -220,13 +220,13 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
     # obj += gp.quicksum(edge_times[i] * x[i,:].sum() for i in range(N_edges))
 
     m.setObjective(obj, GRB.MINIMIZE)
-    if not stackelberg:
+    if not nash:
         m.addConstrs(e[l,i]\
                     >=  x[i,:].sum() \
                     +  xr[i] \
                     - theta[l]*capacities[i] \
                     - gp.quicksum(e[l+k+1,i] for k in range(n-l-1)) for i in range(N_edges) for l in range(n))
-    elif stackelberg:
+    elif nash:
         m.addConstrs(e[l,i]\
                     >=  x[i,:].sum() \
                     +  xr[i] \
