@@ -19,7 +19,6 @@ tNet_coords = tNet_coords[:, ::-1]
 node_list = list(tNet.G.nodes())                       # index → label
 node_idx_map = {n: i for i, n in enumerate(node_list)} # label → index
 edge_list = list(tNet.G.edges())
-
 def latlon_to_xy(lat: np.ndarray,
                  lon: np.ndarray,
                  lat0: float | None = None) -> np.ndarray:
@@ -130,11 +129,11 @@ def solve_kmedian(lat: Sequence[float], lon: Sequence[float], k_keep: int) -> Tu
     # some stats
     max_d   = d_nearest.max()
     mean_d  = d_nearest.mean()
-    p95_d   = np.percentile(d_nearest, 95)
+    p95_d   = np.percentile(d_nearest, 90)
     
     print(f"max  distance to nearest kept node : {max_d/1000:.3f} km")
     print(f"mean distance                      : {mean_d:.1f} m")
-    print(f"95-percentile distance              : {p95_d:.1f} m")
+    print(f"90-percentile distance              : {p95_d:.1f} m")
 
     return np.array(centers), assignment, XY
 

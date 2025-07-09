@@ -5,7 +5,6 @@ from src.solvers import *
 import matplotlib.pyplot as plt
 import pickle
 from pyproj import Transformer
-from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
 
@@ -16,10 +15,12 @@ plt.rcParams.update({
     "pdf.fonttype": 42,   # Important: embed fonts correctly in PDF
     "ps.fonttype": 42,
     "text.usetex": True,
+    "legend.fontsize": 12,
+    "xtick.labelsize": 15,
+    "ytick.labelsize": 15,
 })
 
 def plot_flows(G: nx.DiGraph, dir):
-    #TODO: fix orientation!
     pos_coords = np.array([G.nodes[i]["pos"] for i in G.nodes()])
     pos_coords = pos_coords[:, ::-1]
     pos_dict = {}
@@ -37,7 +38,7 @@ def plot_flows(G: nx.DiGraph, dir):
     #     pos_dict[node] = pos_coords[count,:]
     edge_colors = [data["utilization"] for _, _, data in G.edges(data=True)]
     raw_edge_colors = [data["raw_utilization"] for _, _, data in G.edges(data=True)]
-
+    print(max(edge_colors))
     fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10,10))
     edges = nx.draw_networkx_edges(
         G,
@@ -45,21 +46,21 @@ def plot_flows(G: nx.DiGraph, dir):
         edge_color=edge_colors,
         edge_cmap=plt.cm.viridis,
         edge_vmin=0.0,
-        edge_vmax=1.0,
+        # edge_vmax=1.0,
         width=1,
         ax=ax[0],
         arrows=False
     )
     nx.draw_networkx_nodes(G, pos_dict, node_size=5, node_color='black', ax=ax[0])
     cbar = plt.colorbar(edges, ax=ax[0])
-    cbar.set_label(r"Congestion level (\%)", labelpad=8)
-    ax[0].set_title(r"Congestion as (flow/capacity)")
+    cbar.set_label(r"(flow/capacity)", labelpad=8)
+    ax[0].set_title(r"Road utilization")
     ax[0].axis("off")
     # plt.savefig("results/road_usage_heatmap.pdf", format="pdf")
     # plt.show(block=False)
 
     flows = np.array(raw_edge_colors)
-    vmax = np.percentile(flows, 99)  # 99th percentile cap
+    # vmax = np.percentile(flows, 95)  # 99th percentile cap
 
     edges = nx.draw_networkx_edges(
         G,
@@ -67,7 +68,7 @@ def plot_flows(G: nx.DiGraph, dir):
         edge_color=raw_edge_colors,
         edge_cmap=plt.cm.viridis,
         # edge_vmin=0.0,
-        edge_vmax=vmax,
+        # edge_vmax=vmax,
         width=1,
         ax=ax[1],
         arrows=False
@@ -93,7 +94,7 @@ def main() -> None:
     cfg.vehicle_limit = 15000
     cfg.mu_initial = 1e-2
     cfg.stable_needed = 3
-    cfg.demand_multiplier=20
+    cfg.demand_multiplier=1
     cfg.delay_factor=2 / 60
     cfg.waiting_time=2 / 60
     sim = RidePoolingSimulationCore(cfg)
@@ -105,10 +106,10 @@ def main() -> None:
     # with open("results/NYC_supergraph_solved.gpickle", "wb") as f:
     #     pickle.dump(sim.tNet.G_supergraph, f)
     plot_flows(sim.original_G, cfg.results_dir)
-    with open(cfg.results_dir+ "config.txt", "w") as f:
-        for field in fields(cfg):
-            value = getattr(cfg, field.name)
-            f.write(f"{field.name}:{value}\n")
+    # with open(cfg.results_dir+ "config.txt", "w") as f:
+    #     for field in fields(cfg):
+    #         value = getattr(cfg, field.name)
+    #         f.write(f"{field.name}:{value}\n")
 
 
 if __name__ == "__main__":

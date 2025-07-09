@@ -31,7 +31,7 @@ class RidePoolingSimulationCore:
         )
         with open("data/gml/NYC_small_demands.gpickle", 'rb') as f:
             self.tNet.g = pickle.load(f)
-        self.tNet.set_g(tnet.perturbDemandConstant(self.tNet.g, self.cfg.demand_multiplier*1/24))
+        self.tNet.set_g(tnet.perturbDemandConstant(self.tNet.g, self.cfg.demand_multiplier))
         self.tNet.read_node_coordinates("data/pos/NYC.txt")
         self.original_G = self.tNet.G
         # 2.2 Replace road graphs with pre-built pickles ------------------
@@ -46,7 +46,7 @@ class RidePoolingSimulationCore:
         }
         self._n_nodes = len(self._car_node_idx)
         self._car_node_idx_np = dict_to_lookup(self._car_node_idx)
-        self.stackelberg = 0
+        self.nash = 0
 
     # ------------------------------------------------------------------
     # Public driver
@@ -197,7 +197,8 @@ class RidePoolingSimulationCore:
             self._ori_car_node_idx,
             self._n_nodes,
             self.original_G,
-            self.stackelberg
+            self.nash,
+            self.cfg.verbose
         )
 
     # ---------- edge cost update -------------------------------------
@@ -334,11 +335,6 @@ class RidePoolingSimulationCore:
                 d["t_cars"] = base
             else:
                 d["t_1"] = d["t_0"]
-
-        # also keep a history on the road graph (optional diagnostics) --
-        # for u, v in self.tNet.G.edges():
-        #     e = self.tNet.G[u][v]
-        #     e["t_2"] = e.get("t_1", e["t_0"])  # shift previous value
         del full_list
         gc.collect()
 
@@ -414,4 +410,4 @@ class RidePoolingSimulationCore:
 
         df = pd.DataFrame(self.metrics)
         df.to_csv(self.cfg.results_dir + f"results_{self.cfg.city_tag}.csv", index=False)
-        logger.info("Metrics saved → %s", self.cfg.results_csv)
+        logger.info("Metrics saved → %s", self.cfg.results_dir)

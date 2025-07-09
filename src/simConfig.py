@@ -13,6 +13,7 @@ class SimulationConfig:
     max_iterations: int = 21
     demand_multiplier: float = 1
     Tmax:float=0.5
+    verbose: bool = True
 
     # adaptive-µ controls
     mu_initial: float = 1e-4
