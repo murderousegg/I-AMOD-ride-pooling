@@ -175,14 +175,27 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
     Binc = nx.incidence_matrix(G, nodelist=node_order, edgelist=edge_order, oriented=True)
     [N_nodes,N_edges] = Binc.shape
     # Binc.sort_indices()
+    edge_times = [G[u][v].get("t_0") for u, v in edge_order]
+    capacities = [G[u][v].get("capacity") for u, v in edge_order]    
+    cap_arr = np.asarray(capacities)
+
+    if nash:
+        exo_flow = [G[u][v]['exo_flow'] for u, v in edge_order]
+        max_ratio = np.max(np.array(exo_flow) / np.maximum(cap_arr, 1e-9))
+        theta_n = max(theta_n, 1.2*max_ratio)  # 20% headroom
 
     fc = fcoeffs.copy()
     if (theta==False) or (a==False):
         theta, a, rms  = get_approx_fun(fcoeffs=fc, nlines=n, range_=[0,theta_n])
 
-    for ii in range(N_nodes):
-         Demands[ii][ii] = -np.sum(Demands[:][ii]) - Demands[ii][ii]
-    
+    widths = np.diff(theta)
+    seg_w = np.outer(widths, cap_arr)
+
+    Dem = np.array(Demands, copy=True, dtype=float)
+    row_sums = Dem.sum(axis=1)
+    diag = np.diag(Dem)
+    Dem[np.arange(N_nodes), np.arange(N_nodes)] = -(row_sums - diag)    
+
     # Initialize Gurobi model and variables
     m = gp.Model("LTIFM_reb")
     m.setParam('OutputFlag',0)
@@ -190,10 +203,9 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
     m.setParam("Crossover", 0)
     x = m.addMVar((N_edges, N_nodes), lb=0, name="x")
     xr = m.addMVar(N_edges, lb=0, name="xr")
-    e = m.addVars(n, N_edges, vtype=GRB.CONTINUOUS, lb=0, name="e")
-    # Set up objective
-    edge_times = [G[u][v].get("t_0") for u, v in edge_order]
-    capacities = [G[u][v].get("capacity") for u, v in edge_order]
+    e = m.addVars(range(n), range(N_edges), lb=0.0, ub={(l,i): (seg_w[l,i] if l < n-1 else GRB.INFINITY) for l in range(n) for i in range(N_edges)}, name="e")
+    m.update()
+    
     if not nash:
         obj = gp.quicksum(\
                 gp.quicksum(edge_times[i] * a[l]/capacities[i] *( \
@@ -203,23 +215,31 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
                 ) for l in range(len(theta)-1))  \
                 + (edge_times[i]) * xr[i]\
                 for i in range(N_edges))
+        m.setObjective(obj, GRB.MINIMIZE)
     elif nash:
-        exo_flow = [G[u][v].get("flow") for u, v in edge_order]
-        obj = gp.quicksum(\
-                gp.quicksum(edge_times[i] * a[l]/capacities[i] *(\
-                e[l,i] * (0+gp.quicksum(((theta[k + 1] - theta[k])*capacities[i]) for k in range(0,l))) \
-                + e[l,i] * ((theta[l + 1] - theta[l])*capacities[i] ) \
-                + (theta[l+1] - theta[l])*capacities[i]*(0+gp.quicksum(e[k,i] for k in range(l+1, len(theta)-1))) \
-                - e[l,i] * exo_flow[i] \
+        exo_flow = [G[u][v]['exo_flow'] for u, v in edge_order]
+        obj_terms = []
+        for i in range(N_edges):
+            t0 = edge_times[i]
+            cap = capacities[i]
+            xp  = exo_flow[i]
+            for l in range(n):
+                prefix = gp.quicksum((theta[k+1] - theta[k]) * cap for k in range(l))
+                width_l = (theta[l+1] - theta[l]) * cap
+                suffix = gp.quicksum(e[k,i] for k in range(l+1, n))
+                obj_terms.append(
+                    t0 * a[l]/cap * (
+                        e[l,i] * (prefix) +
+                        e[l,i] * (width_l) +
+                        width_l * suffix -
+                        e[l,i] * xp
+                    )
                 )
-                  for l in range(len(theta)-1))  \
-                + (edge_times[i]) * xr[i]\
-                for i in range(N_edges))
-        
-    
-    # obj += gp.quicksum(edge_times[i] * x[i,:].sum() for i in range(N_edges))
+            # rebalancing penalty (use your weights)
+            obj_terms.append(t0 * xr[i]) 
+        obj = gp.quicksum(obj_terms)
+        m.setObjective(obj, GRB.MINIMIZE)
 
-    m.setObjective(obj, GRB.MINIMIZE)
     if not nash:
         m.addConstrs(e[l,i]\
                     >=  x[i,:].sum() \
@@ -227,22 +247,31 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
                     - theta[l]*capacities[i] \
                     - gp.quicksum(e[l+k+1,i] for k in range(n-l-1)) for i in range(N_edges) for l in range(n))
     elif nash:
+        exo_flow = [G[u][v]['flow'] for u, v in edge_order]
         m.addConstrs(e[l,i]\
                     >=  x[i,:].sum() \
                     +  xr[i] \
                     + exo_flow[i] \
                     - theta[l]*capacities[i] \
                     - gp.quicksum(e[l+k+1,i] for k in range(n-l-1)) for i in range(N_edges) for l in range(n))
+        
     # Demand reshaped to 1D array
+    B = Binc.toarray().astype(float)
     for i in range(N_nodes):
-        m.addMConstr(Binc, x[:,i], sense='=', b=Demands[i,:], name=f"DemandBalance_{i}")
+        m.addMConstr(B, x[:,i], sense='=', b=Dem[i,:], name=f"DemandBalance_{i}")
+    
+    #start rebalancing constraints
     total_flow = gp.MLinExpr.zeros(N_edges)
-    for i in range(N_nodes):
-        total_flow += x[:,i]
+    for c in range(N_nodes):
+        total_flow += x[:, c]
     total_flow += xr
-    reb_expr = Binc @ total_flow
-    zeros = np.zeros(N_nodes)
-    m.addConstrs((reb_expr[i] == zeros[i] for i in range(N_nodes)), name=f"rebalancing_{i}")
+    for n_idx in range(N_nodes):
+        expr = gp.LinExpr()
+        for e_idx, coeff in enumerate(B[n_idx, :]):
+            if coeff != 0:
+                expr += coeff * total_flow[e_idx]
+        m.addConstr(expr == 0.0, name=f"rebal_{n_idx}")
+
     # Solve the model
     m.update()
     m.printStats()
@@ -259,7 +288,7 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
     
     # Reshape x to matrix and calculate individual times
     sol["IndividualTimes"] = 0
-    sol["Dem"] = Demands
+    sol["Dem"] = Dem
     m.close()
     
     return sol

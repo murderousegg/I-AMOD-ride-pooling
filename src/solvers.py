@@ -87,7 +87,7 @@ class NetSnapshot:
     node_order: list
     origins: list
     demand_matrix: np.ndarray  # shape = (|origins| , |nodes|)
-
+    alpha_o: np.ndarray
     @property
     def N_edges(self) -> int:  # noqa: N802 (want to match paper notation)
         return self.Binc.shape[1]
@@ -107,32 +107,23 @@ class CARSResult:
 # Pre-processing helper: build snapshot once and reuse every iteration
 # ---------------------------------------------------------------------------
 
-def _build_snapshot(tnet, fairness=False) -> NetSnapshot:
+def _build_snapshot(tnet) -> NetSnapshot:
     node_order = list(tnet.G_supergraph.nodes())
     edge_order = list(tnet.G_supergraph.edges())
     Binc = nx.incidence_matrix(tnet.G_supergraph, nodelist=node_order, edgelist=edge_order, oriented=True).tocsr()
-    if not fairness:
-        origins = sorted({o for o, _ in tnet.g.keys()})
-        demand = np.zeros((len(origins), len(node_order)))
-        origin_idx = {o: i for i, o in enumerate(origins)}
-        node_idx = {n: i for i, n in enumerate(node_order)}
-        for (o, d), q in tnet.g.items():
-            demand[origin_idx[o], node_idx[d]] += q
-        # ensure row-sum zero (supply = –demand) per origin
-        for o, i in origin_idx.items():
-            demand[i, node_idx[o]] = -demand[i].sum()
-
-    elif fairness:
-        origins = [(u, v) for (u, v) in tnet.g.keys()]  # use OD pairs as origins
-        demand = np.zeros((len(origins), len(node_order)))
-        origin_idx = {(o,d): i for i, (o,d) in enumerate(origins)}
-        node_idx = {n: i for i, n in enumerate(node_order)}
-        for idx, ((_,d),q) in enumerate(tnet.g.items()):
-            demand[idx, node_idx[d]] += q
-        for (o,d), i in origin_idx.items():
-            demand[i, node_idx[o]] = -demand[i].sum()
+    origins = sorted({o for o, _ in tnet.g.keys()})
+    origin_idx = {o: i for i, o in enumerate(origins)}
+    node_idx = {n: i for i, n in enumerate(node_order)}
+    alpha_o = np.zeros(len(origins))
+    demand = np.zeros((len(origins), len(node_order)))
+    for (o, d), q in tnet.g.items():
+        demand[origin_idx[o], node_idx[d]] += q
+        alpha_o[origin_idx[o]] += q
+    # ensure row-sum zero (supply = –demand) per origin
+    for o, i in origin_idx.items():
+        demand[i, node_idx[o]] = -demand[i].sum()
         
-    return NetSnapshot(Binc=Binc, edge_order=edge_order, node_order=node_order, origins=origins, demand_matrix=demand)
+    return NetSnapshot(Binc=Binc, edge_order=edge_order, node_order=node_order, origins=origins, demand_matrix=demand, alpha_o=alpha_o)
 
 # ---------------------------------------------------------------------------
 # Core model builder
@@ -267,9 +258,12 @@ def _build_objective_fair(tnet, snap: NetSnapshot, x, eps, params: SolverParams)
     ])
     base_obj = edge_times @ x.sum(axis=1)
 
-    suff_obj = quicksum(eps[i]*alpha for i, alpha in enumerate(tnet.g.values()))
+    #sufficiency
+    tot_alpha = snap.alpha_o.sum()
+    suff_obj = quicksum(eps[i]*snap.alpha_o[i] for i in range(len(snap.origins)))
+    suff_obj = suff_obj / tot_alpha
 
-    # --- remove prox if not requested ---------------------------------
+    # no prox term in first iter
     if params.mu <= 0 or params.prev_x is None:
         return suff_obj, base_obj, 0
     
@@ -292,26 +286,24 @@ def _build_objective_fair(tnet, snap: NetSnapshot, x, eps, params: SolverParams)
 
     return suff_obj, base_obj, prox_expr
 
-def _add_sufficiency_constraints(tnet, m, x, eps, Tmax, iter):
+def _add_sufficiency_constraints(tnet, m, x, eps, Tmax, iter, snap: NetSnapshot):
     expr = []
     if iter == 0:
         times = np.array([float(tnet.G_supergraph[u][v]['t_0']) for u, v in tnet.G_supergraph.edges()])
     else:
         times = np.array([float(tnet.G_supergraph[u][v]['t_1']) for u, v in tnet.G_supergraph.edges()])
     
-    for idx, (w, d) in enumerate(tnet.g.items()):
-        avg_time_expr = (times @ x[:, idx]) / d  # matrix-vector product
+    for idx, o in enumerate(snap.origins):
+        avg_time_expr = (times @ x[:, idx]) / snap.alpha_o[idx]  # matrix-vector product
         expr.append(avg_time_expr)
         m.addConstr(eps[idx] >= avg_time_expr - Tmax)
     return expr
     
 
 @timeit
-def _solve_cars_gurobi_fair(tnet, snap: NetSnapshot, params: SolverParams) -> CARSResult:
-    snap.origins = [u for u,v in tnet.g.keys()] # instead of origins use OD pairs
+def _solve_cars_gurobi_fair(tnet, snap: NetSnapshot, params: SolverParams) -> tuple[CARSResult, Dict]:
     m = gp.Model(f"CARS{params.iteration}")
     _configure_gurobi(m, params)
-
     # variables -------------------------------------------------------
     x = m.addMVar((snap.N_edges, len(snap.origins)), name="x", lb=0)
     xr = None
@@ -322,11 +314,13 @@ def _solve_cars_gurobi_fair(tnet, snap: NetSnapshot, params: SolverParams) -> CA
     _add_flow_conservation_M(m, snap, x, xr, params)
     expr = _add_vehicle_cap_M(m, tnet, snap, x, xr, params)
     _add_modal_constraints_M(m, snap, x)
-    expr_suff = _add_sufficiency_constraints(tnet, m, x, eps, params.Tmax, params.iteration)
+    expr_suff = _add_sufficiency_constraints(tnet, m, x, eps, params.Tmax, params.iteration, snap)
 
     # objective -------------------------------------------------------
-    base_obj, suff_obj, mu_obj = _build_objective_fair(tnet, snap, x, eps, params)
-    m.setObjective(0.0005*(base_obj+mu_obj) + suff_obj, GRB.MINIMIZE)
+    suff_obj, base_obj, mu_obj = _build_objective_fair(tnet, snap, x, eps, params)
+    base_scale = 1e-8
+    m.setObjective(base_scale*(base_obj+mu_obj) + suff_obj, GRB.MINIMIZE)
+    # move mu_obj out of brackets, try different scales for rho (start = 1e-4)
     
     @timeit
     def _perform_opt():
@@ -334,20 +328,29 @@ def _solve_cars_gurobi_fair(tnet, snap: NetSnapshot, params: SolverParams) -> CA
     _perform_opt()
 
     x_mat  = x.X
-
     flows = x_mat.sum(axis=1)
     prev_mat = x_mat
-    obj = base_obj.getValue()
+    obj_dict = {}
+    
+    obj = suff_obj.getValue()
+    obj_dict["suff"] = obj
+    obj_dict["base"] = base_scale*base_obj.getValue()
+    if mu_obj:
+        obj_dict["mu"] = base_scale*mu_obj.getValue()
+    else:
+        obj_dict["mu"] = 0
+
+    logger.info(f"Fairness objective: {obj}")
     cars_expected = expr.getValue()
     avg_time_suff = []
-    for i,(w,d) in enumerate(tnet.g.items()):
+    for i in range(len(snap.origins)):
         avg_time_suff.append(expr_suff[i].getValue())
     # write flows back for downstream code
     for i, (u, v) in enumerate(snap.edge_order):
         tnet.G_supergraph[u][v]["flowNoRebalancing"] = flows[i]
 
     m.dispose()
-    return CARSResult(avg_time=avg_time_suff, x_vec=prev_mat, expected_cars=cars_expected, obj_val=obj)
+    return CARSResult(avg_time=avg_time_suff, x_vec=prev_mat, expected_cars=cars_expected, obj_val=obj), obj_dict
 
 ###############################################################################
 # 0. Functional helper: compute_results                                        #
@@ -462,7 +465,7 @@ def compute_results(
     np.fill_diagonal(full_solo_demand,   0)
     np.fill_diagonal(full_pooled_demand, 0)
     full_demand = full_solo_demand + full_pooled_demand
-    np.save("full_demand.npy", full_demand)
+    # np.save("full_demand.npy", full_demand)
     # LTIFM per class ----------------------------------------------------
     sol_np = LTIFM_reb_sparse(full_demand, road_graph, fcoeffs=fcoeffs, nash=nash)
 

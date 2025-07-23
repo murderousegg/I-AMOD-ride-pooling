@@ -164,8 +164,10 @@ class TrafficAssignment(object):
                 self.graph[a[0]][a[1]]['help_flow'] += flow
     #@timeit
     def calculate_flows(self, phi):
-        [self.set_edge_attribute(edge, 'flow', (1 - phi) * self.get_edge_attribute(edge, 'flow') + \
-            phi * self.get_edge_attribute(edge, 'help_flow')) or edge in self.graph.edges() for edge in self.graph.edges()]
+        for edge in self.graph.edges():
+            flow = (1 - phi) * self.get_edge_attribute(edge, 'flow') + \
+                phi * self.get_edge_attribute(edge, 'help_flow')
+            self.set_edge_attribute(edge, 'flow', flow)
 
 
     def calculate_traveltime_social_edge_exo(self, edge,  fcoeffs, exogenous_G=False):
@@ -268,7 +270,8 @@ class TrafficAssignment(object):
 
 
     def run(self, fcoeffs=[1,0,0,0,0.15,0], build_t0=False, exogenous_G=False, verbose=0):
-        pool = mp.Pool(mp.cpu_count()-1)
+        par_processes = min(mp.cpu_count() - 1, 8)
+        pool = mp.Pool(par_processes)
 
         # assign od matrix to od graph (if matrix is given)
         if self.od_matrix is not None:

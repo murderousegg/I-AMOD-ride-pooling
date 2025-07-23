@@ -11,17 +11,17 @@ from pathlib import Path
 from dataclasses import fields
 import matplotlib.pyplot as plt
 
-plt.rcParams.update({
-    "font.family": "sans-serif",
-    "font.serif": ["Times"],
-    "font.size": 13,                     # IEEE style prefers 8–10 pt
-    "pdf.fonttype": 42,   # Important: embed fonts correctly in PDF
-    "ps.fonttype": 42,
-    "text.usetex": True,
-    "legend.fontsize": 12,
-    "xtick.labelsize": 15,
-    "ytick.labelsize": 15,
-})
+# plt.rcParams.update({
+#     "font.size": 25,                     # IEEE style prefers 8–10 pt
+#     "pdf.fonttype": 42,   # Important: embed fonts correctly in PDF
+#     "ps.fonttype": 42,
+#     "legend.fontsize": 25,
+#     "xtick.labelsize": 17,
+#     "ytick.labelsize": 25,
+#     "text.latex.preamble": r'\usepackage{dsfont}',
+#     "axes.labelsize": 20,
+# })
+
 
 class penrateSimulation(RidePoolingSimulationCore):
     def __init__(self, cfg: SimulationConfig):
@@ -31,12 +31,14 @@ class penrateSimulation(RidePoolingSimulationCore):
         self.tNet_private, self.tstamp, self.fcoeffs = nyc.build_NYC_net(
             "data/net/NYC/", only_road=True
         )
+        self.tNet_private.TAP.threshold = 1e-1
         self._init_penrate_metrics()
 
         with open("data/gml/NYC_small_demands.gpickle", 'rb') as f:
             self.g = pickle.load(f)
-        self.g = tnet.perturbDemandConstant(self.g, self.cfg.demand_multiplier/24)
-        self.private_g = tnet.perturbDemandConstant(self.tNet_private.g, self.cfg.demand_multiplier/24)
+        self.g = tnet.perturbDemandConstant(self.g, self.cfg.demand_multiplier)
+        self.private_g = tnet.perturbDemandConstant(self.tNet_private.g, self.cfg.demand_multiplier)
+        self.base_vehicle_lim = cfg.vehicle_limit
 
     def _init_penrate_metrics(self):
         keys = [
@@ -53,12 +55,12 @@ class penrateSimulation(RidePoolingSimulationCore):
         self.penrate_metrics = {k: [] for k in keys}
 
     def _init_penrate(self, penrate):
-        self.cfg.vehicle_limit *= penrate
+        self.cfg.vehicle_limit = self.base_vehicle_lim * penrate
         self._initialize_networks(pen_rate=penrate)
 
     def _initialize_networks(self, pen_rate):
-        self.tNet.set_g(tnet.perturbDemandConstant(self.g, constant=(1-pen_rate)))
-        self.tNet_private.set_g(tnet.perturbDemandConstant(self.private_g, constant=pen_rate))
+        self.tNet.set_g(tnet.perturbDemandConstant(self.g, constant=(pen_rate)))
+        self.tNet_private.set_g(tnet.perturbDemandConstant(self.private_g, constant=(1-pen_rate)))
 
     def _update_road_edge_costs(self, y: np.ndarray, yr: np.ndarray) -> Tuple[float, float]:
         total_cars = reb_cars = 0.0
@@ -66,17 +68,23 @@ class penrateSimulation(RidePoolingSimulationCore):
             edge = self.original_G[u][v]
             t0, cap = edge["t_0"], edge["capacity"]
             if self.nash:
-                exo_flow_ij = self.tNet_private.G[u][v]['flow']
+                exo_flow_ij = edge["exo_flow"]
             else:
                 exo_flow_ij = 0
             flow = y[k, :].sum() + yr[k]
             flow_exo = flow + exo_flow_ij
             edge["t_1"] = t0 * (1 + 0.15 * (flow_exo / cap) ** 4)
-            total_cars += flow_exo * edge["t_1"]
+            total_cars += flow * edge["t_1"]
             reb_cars += yr[k] * edge["t_1"]
             edge['flow'] = flow
             edge['flowRebalancing'] = yr[k]
         return total_cars, reb_cars
+    
+    def _update_t1_exo(self):
+        for k, (u, v) in enumerate(self.original_G.edges()):
+            edge = self.original_G[u][v]
+            t0, cap, flow = edge["t_0"], edge["capacity"], edge["exo_flow"]
+            edge["t_1"] = t0 * (1 + 0.15 * (flow / cap) ** 4)
     
     def add_private_to_rg(self) -> None:
         """
@@ -84,12 +92,12 @@ class penrateSimulation(RidePoolingSimulationCore):
         This is done by updating the edge flows in the original_G with the flows from tNet_private.
         """
         for i, j in self.original_G.edges():
-            self.original_G[i][j]['flow'] += self.tNet_private.G[i][j]['flow']
+            self.original_G[i][j]['exo_flow'] = self.tNet_private.G[i][j]['flow']
 
     @timeit
     def run_private(self) -> None:
-        self.tNet_private.TAP.n_iter_tm = 500    # limit tap iterations
-        self.tNet_private.solveMSA(exogenous_G=self.original_G, verbose=0)   #set verbose 1 for console prints
+        self.tNet_private.TAP.n_iter_tm = 300    # limit tap iterations
+        self.tNet_private.solveMSA(exogenous_G=self.original_G, verbose=1)   #set verbose 1 for console prints
 
     def log_penrate_results(self, pen_rate)-> None:
         ### append flows in user travel time
@@ -110,9 +118,9 @@ class penrateSimulation(RidePoolingSimulationCore):
         self.penrate_metrics["totCost"].append(totCost)
         logger.info(f"penetration rate: {pen_rate}")
     
-    def save_penrate_csv(self):
+    def save_penrate_csv(self, dir, pen_rate):
         df = pd.DataFrame(self.penrate_metrics)
-        df.to_csv(self.cfg.results_dir + f"penrate_metrics.csv", index=False)
+        df.to_csv(dir + f"penrate_metrics_{pen_rate}.csv", index=False)
         logger.info("Metrics saved → %s", self.cfg.results_dir)
 
 
@@ -139,20 +147,20 @@ def plot_penrate(sim: penrateSimulation, dir: str) -> None:
     plt.tight_layout()
     plt.savefig(sim.cfg.results_dir + f"costs.pdf")
     plt.figure()
-    width = 0.05
+    width = 0.2
     ind = list(np.linspace(0.01,0.99, len(totCost)))
-    p1 = plt.bar(ind, privateFlow, width)
+    p1 = plt.bar(ind, privateFlow, width, edgecolor='black', linewidth=0.5, color='tab:purple')
     p2 = plt.bar(ind, rpFlow, width,
-                bottom=privateFlow)
-    p3 = plt.bar(ind, ptFlow, width, bottom=[x+y for x,y in zip(privateFlow, rpFlow)])
+                bottom=privateFlow, edgecolor='black', linewidth=0.5, color='tab:blue')
+    p3 = plt.bar(ind, ptFlow, width, bottom=[x+y for x,y in zip(privateFlow, rpFlow)], edgecolor='black', linewidth=0.5, color='tab:orange')
     p4 = plt.bar(ind, bikeFlow, width,
-                bottom=[x+y+z for x,y,z in zip(privateFlow, rpFlow, ptFlow)])
+                bottom=[x+y+z for x,y,z in zip(privateFlow, rpFlow, ptFlow)], edgecolor='black', linewidth=0.5, color='tab:green')
     p5 = plt.bar(ind, pedFlow, width,
-                bottom=[x+y+z+i for x,y,z,i in zip(privateFlow, rpFlow, ptFlow, bikeFlow)])
+                bottom=[x+y+z+i for x,y,z,i in zip(privateFlow, rpFlow, ptFlow, bikeFlow)], edgecolor='black', linewidth=0.5, color='tab:red')
     plt.ylabel(r"Time-based Modal Share ($\mathrm{h}$)")
     plt.xlabel(r"Penetration Rate ($\mathrm{\%}$)")
     plt.legend((p1[0], p2[0], p3[0], p4[0],p5[0]), ('Private', 'Ride-pooling', 'Public transportation', 'Biking', 'Walking'))
-    plt.xlim([0,1])
+    plt.xlim([-0.05,1.05])
     plt.tight_layout()
     plt.grid(True, axis='y', alpha=0.5)
     plt.savefig(sim.cfg.results_dir + "modal_share.pdf")
@@ -165,28 +173,32 @@ def main() -> None:
     # create results directory
     now_string = datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
     cfg.results_dir = f"results/penRate_NYC_{now_string}/"
+    parent_dir = cfg.results_dir
     Path(cfg.results_dir).mkdir(parents=True, exist_ok=True)
     ###
     cfg.verbose=False
     cfg.max_iterations = 1
-    cfg.vehicle_limit = 45000
+    cfg.vehicle_limit = 10000
     cfg.mu_initial = 1e-2
-    cfg.stable_needed = 3
-    cfg.demand_multiplier=4
+    cfg.stable_needed = 2
+    cfg.demand_multiplier=1
     cfg.delay_factor= 1 / 60
     cfg.waiting_time= 1 / 60
     sim = penrateSimulation(cfg)
     for pen_rate in np.linspace(0.01,0.99, 4):
         sim._init_penrate(pen_rate)
-        for nash in range(10):
+        for nash in range(2):
+            cfg.results_dir = parent_dir+f"nash_{nash}_penrate_{round(pen_rate, 2)}/"
             sim.nash = nash
-            sim.run()
+            sim.run(warm=1%(nash+1))
             sim.run_private()
             sim.add_private_to_rg()
+            sim._update_t1_exo()
+            sim._apply_new_times(sim.tNet.G_supergraph, None)
         sim.log_penrate_results(pen_rate)
-        sim.save_penrate_csv()
+        sim.save_penrate_csv(parent_dir, pen_rate)
     plot_penrate(sim, cfg.results_dir)
-    with open(cfg.results_dir+ "config.txt", "w") as f:
+    with open(parent_dir+ "config.txt", "w") as f:
         for field in fields(cfg):
             value = getattr(cfg, field.name)
             f.write(f"{field.name}:{value}\n")

@@ -10,6 +10,7 @@ from src.solvers import _build_snapshot, _solve_cars_gurobi_fair
 import matplotlib.pyplot as plt
 from datetime import datetime
 from pathlib import Path
+from dataclasses import fields
 
 class sufficiencySimulation(RidePoolingSimulationCore):
     def __init__(self, cfg: SimulationConfig):
@@ -34,7 +35,7 @@ class sufficiencySimulation(RidePoolingSimulationCore):
 
         for it in range(self.cfg.max_iterations):
             mu = self._adapt_mu(it, mu, prev_obj, prev2_obj)
-            avg_time, x, expected_cars, obj = self._solve_cars(
+            avg_time, x, expected_cars, obj, obj_dict = self._solve_cars(
                 it, mu, prev_x, reb_cars_est, car_ratio_smoothed, r
             )
             logger.info(f"expected number of cars: {expected_cars}")
@@ -68,7 +69,8 @@ class sufficiencySimulation(RidePoolingSimulationCore):
                 self._record_metrics(demand_split, total_cars, reb_cars)
             logger.info("Completed iteration %d", it + 1)
             r = 1 + self.metrics["double_share"][-1]
-            self._plot_sufficiency_share(self, avg_time, it, x)
+            self._plot_sufficiency_share(avg_time, it, x, obj_dict)
+        self._plot_mode_share()
         self._save_metrics_csv()
         return avg_time, x
     
@@ -86,65 +88,99 @@ class sufficiencySimulation(RidePoolingSimulationCore):
         )
         snap = getattr(self, "_cars_snapshot", None)
         if snap is None:
-            snap = self._cars_snapshot = _build_snapshot(self.tNet, fairness=True)
-        res = _solve_cars_gurobi_fair(self.tNet, snap, params)
-        return res.avg_time, res.x_vec, res.expected_cars, res.obj_val
+            snap = self._cars_snapshot = _build_snapshot(self.tNet)
+        (res, obj_dict) = _solve_cars_gurobi_fair(self.tNet, snap, params)
+        return res.avg_time, res.x_vec, res.expected_cars, res.obj_val, obj_dict
 
-    def _bin_results(self, avg_time, x):
-        num_bins = 20
-        ODs = len(avg_time)
-        sorted_idx = np.argsort(avg_time)
-        bin_ids = np.empty(ODs, dtype=int)
-        bin_size = ODs // num_bins
-        for i in range(num_bins):
-            start = i * bin_size
-            end = (i + 1) * bin_size if i < num_bins - 1 else ODs
-            bin_ids[sorted_idx[start:end]] = i
+    def _bin_results(self, avg_time, x, bin_width_min=1):
+        avg_time = np.asarray(avg_time) * 60  # Convert from hours to minutes
+        alpha_o = self._cars_snapshot.alpha_o
+
+        # Define bin edges in minutes
+        max_time = np.ceil(avg_time.max())
+        bin_edges = np.arange(0, max_time + bin_width_min, bin_width_min)
+        num_bins = len(bin_edges) - 1
+
+        # Bin assignments
+        bin_ids = np.digitize(avg_time, bin_edges, right=False) - 1
+        bin_ids = np.clip(bin_ids, 0, num_bins - 1)
+
+        # Bin centers for plotting
+        binned_times = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
         N_edges = x.shape[0]
         binned_x = np.zeros((N_edges, num_bins))
+        binned_alphas = np.bincount(bin_ids, weights=alpha_o, minlength=num_bins)
 
-        alphas = np.array(list(self.tNet.g.values()))
-        binned_alphas = np.bincount(bin_ids, weights=alphas, minlength=num_bins)
         for i in range(N_edges):
             np.add.at(binned_x[i], bin_ids, x[i])
-        return binned_x, binned_alphas
+
+        return binned_x, binned_alphas, binned_times
 
 
-    def _plot_sufficiency_share(self, avg_time, it, x):
-        binned_x, binned_alphas = self._bin_results(avg_time, x)
+
+    def _plot_sufficiency_share(self, avg_time, it, x, obj_dict):
+        binned_x, binned_alphas, binned_times = self._bin_results(avg_time, x, bin_width_min=0.5)
+
         ped_flow = np.zeros(binned_x.shape[1])
         bike_flow = np.zeros(binned_x.shape[1])
         pt_flow = np.zeros(binned_x.shape[1])
         rp_flow = np.zeros(binned_x.shape[1])
-        for idx, (u,v,d) in enumerate(self.tNet.G_supergraph.edges(data=True)):
+
+        for idx, (u, v, d) in enumerate(self.tNet.G_supergraph.edges(data=True)):
+            t_1 = self.tNet.G_supergraph[u][v]['t_1']
             if d['type'] == "'":
-                ped_flow += binned_x[idx,:]*self.tNet.G_supergraph[u][v]['t_1']
+                ped_flow += binned_x[idx, :] * t_1
             elif d['type'] == "b":
-                bike_flow += binned_x[idx,:]*self.tNet.G_supergraph[u][v]['t_1']
+                bike_flow += binned_x[idx, :] * t_1
             elif d['type'] == 's':
-                pt_flow += binned_x[idx,:]*self.tNet.G_supergraph[u][v]['t_1']
+                pt_flow += binned_x[idx, :] * t_1
             elif d['type'] == 'rp':
-                rp_flow += binned_x[idx,:]*self.tNet.G_supergraph[u][v]['t_1']
-        ped_flow /= binned_alphas
-        bike_flow /= binned_alphas
-        pt_flow /= binned_alphas
-        rp_flow /= binned_alphas
-        modal_data = np.vstack([rp_flow, pt_flow, bike_flow, ped_flow])
-        fig, ax = plt.subplots(figsize=(10, 5))
-        labels = ['ride-pooling', 'Public transporation', 'Biking', 'Walking']
-        colors = plt.get_cmap("tab10").colors[0:3]
-        bottom = np.zeros(bike_flow.shape[0])
-        for i, (data, label, color) in enumerate(zip(modal_data, labels, colors)):
-            ax.bar(np.arange(bike_flow.shape[0]), data, bottom=bottom, label=label, color=color)
-            bottom += data  
-        plt.axvline(self.Tmax, color='r', linestyle='dashed', linewidth=1)
-        ax.set_xlabel('Bin index')
-        ax.set_ylabel('Average time per request (min)')
-        ax.set_title('Mode-specific travel times per bin')
-        ax.legend()
+                rp_flow += binned_x[idx, :] * t_1
+
+        modal_data = np.vstack([rp_flow, pt_flow, bike_flow, ped_flow]) * 1e-4
+        # fig, ax = plt.subplots(figsize=(10, 5))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5), gridspec_kw={'width_ratios': [5, 1]})
+        labels = ['ride-pooling', 'Public transportation', 'Biking', 'Walking']
+        colors = plt.get_cmap("tab10").colors[:4]
+        bottom = np.zeros_like(binned_times)
+
+        for data, label, color in zip(modal_data, labels, colors):
+            ax1.bar(
+                binned_times, data, bottom=bottom, label=label, color=color,
+                width=0.4, edgecolor='black', linewidth=1
+            )
+            bottom += data
+        
+        ax1.axvline(self.Tmax * 60, color='r', linestyle='dashed', linewidth=1, label=r'$T_{\max}$')
+        # plt.text(.01, .3, f'Sufficiency obj: {obj_dict['suff']}\nTime obj: {obj_dict['base']}\nProximal term: {obj_dict['mu']}',\
+        #           ha='left', va='top', transform=ax1.transAxes, fontsize=13)
+        ax1.set_xlabel(r'Average time per request ($min$)', fontsize = 20)
+        ax1.set_ylabel(r'Time-Based Modal Share ($\times 10^4$ $\mathrm{h}$)', fontsize = 20)
+        # ax1.set_title(fr"Commute Sufficiency $T_{{\max}} = {self.cfg.Tmax}$, $\phi = {self.cfg.demand_multiplier}$ and $N_{{\mathrm{{cars,max}}}} = {self.cfg.vehicle_limit/1000} \times 10^3$", fontsize=18)
+        avg_all = np.average(binned_times, weights=binned_alphas)
+        ax1.axvline(avg_all, color='k', linestyle='dashed', linewidth=1.5, label=r'$T_{\mathrm{avg}}$')
+        ax1.legend(fontsize=17)
+
+        total_per_mode = modal_data.sum(axis=1)
+        bottom = 0
+        for value, label, color in zip(total_per_mode, labels, colors):
+            ax2.bar([0], [value], bottom=bottom, color=color, edgecolor='black', linewidth=0.5)
+            bottom += value
+
+        # Format the right bar
+        ax2.set_xlim(-0.5, 0.5)
+        ax2.set_xticks([])
+        ax2.set_ylabel(r"Total Modal Share ($\times 10^4$ $\mathrm{h}$)", fontsize=20)
+        ax2.yaxis.set_label_position("right")
+        ax2.yaxis.tick_right()
+        ax1.tick_params(axis='both', which='major', labelsize=20)
+        ax2.tick_params(axis='both', which='major', labelsize=20)
+
         plt.tight_layout()
         plt.savefig(f"{self.cfg.results_dir}_fairness_{it}_avg_time_dist.pdf", format='pdf')
         plt.show(block=False)
+
 
 def main() -> None:
     cfg = SimulationConfig()
@@ -154,16 +190,23 @@ def main() -> None:
     cfg.results_dir = f"results/Fairness_{now_string}/"
     Path(cfg.results_dir).mkdir(parents=True, exist_ok=True)
     ###
-    cfg.max_iterations = 1
-    cfg.vehicle_limit = 45000
+    cfg.max_iterations = 15
+    cfg.vehicle_limit = 25000
     cfg.mu_initial = 1e-2
     cfg.stable_needed = 3
-    cfg.demand_multiplier=4
+    cfg.demand_multiplier=3
     cfg.delay_factor=1 / 60
     cfg.waiting_time=1 / 60
+    cfg.tol_obj = 0.1
+    
+    cfg.Tmax = 12/60    #10 mins
 
     sim = sufficiencySimulation(cfg)
     avg_time, x = sim.run()
+    with open(cfg.results_dir+ "config.txt", "w") as f:
+        for field in fields(cfg):
+            value = getattr(cfg, field.name)
+            f.write(f"{field.name}:{value}\n")
 
 
 

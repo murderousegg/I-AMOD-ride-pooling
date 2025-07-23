@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import pickle
 from typing import List
 from joblib import Parallel, delayed, cpu_count
+import os
+import pandas as pd
 
 from src.solvers import *
 from src.solvers import _build_snapshot, _solve_cars_gurobi, _solve_cars_gurobi_M
@@ -10,14 +12,19 @@ from src.simConfig import SimulationConfig
 import src.tnet as tnet
 import experiments.build_NYC_subway_net as nyc
 
-### set plot params ###
-from matplotlib import rc
-rc('text', usetex=True)
-plt.rc('axes', labelsize=13)
-plt.rc('legend', fontsize=12)
-plt.rc('xtick', labelsize=15)
-plt.rc('ytick', labelsize=15)
-rc('font',**{'family':'sans-serif','sans-serif':['Helvetica']})
+import logging
+logging.getLogger("fontTools.subset").setLevel(logging.WARNING)
+
+plt.rcParams.update({
+    "font.size": 15,                     # IEEE style prefers 8–10 pt
+    "pdf.fonttype": 42,   # Important: embed fonts correctly in PDF
+    "ps.fonttype": 42,
+    "legend.fontsize": 12,
+    "xtick.labelsize": 15,
+    "ytick.labelsize": 15,
+    "text.latex.preamble": r'\usepackage{dsfont}',
+    "axes.labelsize": 13,
+})
 
 class RidePoolingSimulationCore:
     """Run the fixed-point mode-allocation simulation."""
@@ -52,7 +59,7 @@ class RidePoolingSimulationCore:
     # Public driver
     # ------------------------------------------------------------------
 
-    def run(self) -> None:
+    def run(self, warm=0) -> None:
         self._init_metrics()
         mu, r = self.cfg.mu_initial, 2.0
         prev_x = prev2_x = None
@@ -63,7 +70,7 @@ class RidePoolingSimulationCore:
 
         logger.info("Total initial demand: %.0f", sum(self.tNet.g.values()))
 
-        for it in range(self.cfg.max_iterations):
+        for it in range(warm, self.cfg.max_iterations+warm):
             mu = self._adapt_mu(it, mu, prev_obj, prev2_obj)
             avg_time, x, expected_cars, obj = self._solve_cars(
                 it, mu, prev_x, reb_cars_est, car_ratio_smoothed, r
@@ -127,11 +134,12 @@ class RidePoolingSimulationCore:
             "double_share",
             "triple_share",
             "total_cars",
-            "reb_flow",
+            "reb_cars",
             "ped_flow",
             "bike_flow",
             "pt_flow",
-            "rp_flow"
+            "rp_flow",
+            "reb_flow"
         ]
         self.metrics = {k: [] for k in keys}
 
@@ -161,8 +169,8 @@ class RidePoolingSimulationCore:
             reb_cars=reb_cars_est,
             r=r
         )
-        snap = getattr(self, "_cars_snapshot", None)
-        if snap is None:
+        
+        if it == 0 or self.nash == 1:
             snap = self._cars_snapshot = _build_snapshot(self.tNet)
         res = _solve_cars_gurobi_M(self.tNet, snap, params)
         return res.avg_time, res.x_vec, res.expected_cars, res.obj_val
@@ -274,6 +282,18 @@ class RidePoolingSimulationCore:
 
         return OD, WT
 
+    def _apply_new_times(self, Gs:nx.DiGraph, total_delay):
+        for u, v, d in Gs.edges(data=True):
+            if d["type"] == "rp":
+                base = nx.shortest_path_length(self.original_G, source=s2int(u), target=s2int(v), weight="t_1")
+                if isinstance(total_delay, np.ndarray):
+                    extra = total_delay[self._car_node_idx[s2int(v)], self._car_node_idx[s2int(u)]]
+                else:
+                    extra=0
+                d["t_1"] = base + extra
+                d["t_cars"] = base
+            else:
+                d["t_1"] = d["t_0"]
 
     def _update_supergraph_costs(self, D_rp: np.ndarray, gamma_arr: np.ndarray) -> None:
         # ------------------------------------------------------------------
@@ -327,14 +347,8 @@ class RidePoolingSimulationCore:
         total_delay = np.divide(OD_delays + Et, D_rp,
                                 out=np.zeros_like(D_rp), where=D_rp != 0)
         Gs = self.tNet.G_supergraph
-        for u, v, d in Gs.edges(data=True):
-            if d["type"] == "rp":
-                base = nx.shortest_path_length(self.original_G, source=s2int(u), target=s2int(v), weight="t_1")
-                extra = total_delay[self._car_node_idx[s2int(v)], self._car_node_idx[s2int(u)]]
-                d["t_1"] = base + extra
-                d["t_cars"] = base
-            else:
-                d["t_1"] = d["t_0"]
+        self._apply_new_times(Gs, total_delay)
+
         del full_list
         gc.collect()
 
@@ -350,6 +364,7 @@ class RidePoolingSimulationCore:
         bike_flow=0
         pt_flow=0
         rp_flow=0
+        reb_flow=0
         for u,v,d in self.tNet.G_supergraph.edges(data=True):
             if d['type'] == "'":
                 ped_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']
@@ -359,16 +374,19 @@ class RidePoolingSimulationCore:
                 pt_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']
             elif d['type'] == 'rp':
                 rp_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']
+        for u,v in self.original_G.edges():
+            reb_flow += self.original_G[u][v]['flowRebalancing']*self.original_G[u][v]['t_1']
         orig, solo, pooled, solo_perc, pooled_perc = demand_stats
         self.metrics["single_share"].append(solo_perc)
         self.metrics["double_share"].append(pooled_perc)
         self.metrics["triple_share"].append(max(0.0, 1 - solo_perc - pooled_perc))
         self.metrics["total_cars"].append(total_cars)
-        self.metrics["reb_flow"].append(reb_cars)
+        self.metrics["reb_cars"].append(reb_cars)
         self.metrics["ped_flow"].append(ped_flow)
         self.metrics["bike_flow"].append(bike_flow)
         self.metrics["pt_flow"].append(pt_flow)
         self.metrics["rp_flow"].append(rp_flow)
+        self.metrics["reb_flow"].append(reb_flow)
         logger.info(f"total cars: {total_cars}, single share: {solo_perc}, double_share: {pooled_perc}")
         logger.info(f"Solo demand: {np.sum(solo)}, Pooled demand: {np.sum(pooled)}")
 
@@ -381,13 +399,13 @@ class RidePoolingSimulationCore:
         x = np.arange(len(self.metrics["single_share"]))
         color = 'tab:blue'
         rp = M["rp_flow"]
-        ax1.bar(x, rp, label="ride-pooling", color=bar_colors[0])
+        ax1.bar(x, rp, label="ride-pooling", color=bar_colors[0], edgecolor='black', linewidth=0.5)
         bottom=rp
-        ax1.bar(x, M['pt_flow'], bottom=bottom, label="Public transporation", color=bar_colors[1])
+        ax1.bar(x, M['pt_flow'], bottom=bottom, label="Public transporation", color=bar_colors[1], edgecolor='black', linewidth=0.5)
         bottom=[rp[i] + M['pt_flow'][i] for i in range(len(rp))]
-        ax1.bar(x, M['bike_flow'], bottom=bottom, label="Biking",corlor=bar_colors[2])
+        ax1.bar(x, M['bike_flow'], bottom=bottom, label="Biking",color=bar_colors[2], edgecolor='black', linewidth=0.5)
         bottom=[rp[i] + M['pt_flow'][i] + M['bike_flow'][i] for i in range(len(rp))]
-        ax1.bar(x, M['ped_flow'], bottom=bottom, label="Walking", color=bar_colors[3])  
+        ax1.bar(x, M['ped_flow'], bottom=bottom, label="Walking", color=bar_colors[3], edgecolor='black', linewidth=0.5)  
         bottom = [rp[i] + M['pt_flow'][i] + M['bike_flow'][i] + M['ped_flow'][i] for i in range(len(rp))]
         ax1.set_xlabel("Iteration")
         ax1.set_ylabel(r"Time-based Modal Share ($\mathrm{h}$)", color=color)
@@ -395,10 +413,10 @@ class RidePoolingSimulationCore:
         ax2 = ax1.twinx()
         color = 'tab:red'
         ax2.set_ylabel(r"($\mathrm{\%}$) of rp requests pooled", color=color)
-        ax2.plot(x, M["double_share"], color=color, marker = 'o')
+        ax2.plot(x, [i * 100 for i in M["double_share"]], color=color, marker = 'o')
         ax2.tick_params(axis='y', labelcolor=color)
-        ax2.set_ylim([0.9,1.0])
-        fig.legend(loc='bottom left')
+        ax2.set_ylim([90,100])
+        fig.legend(loc='lower left')
         fig.tight_layout()
         fig.savefig(f"{self.cfg.results_dir}mode_share.pdf", format='pdf')
 
@@ -406,8 +424,8 @@ class RidePoolingSimulationCore:
     # ---------- CSV output --------------------------------------------
 
     def _save_metrics_csv(self) -> None:
-        import pandas as pd
-
+        if not os.path.exists(self.cfg.results_dir):
+            os.mkdir(self.cfg.results_dir)
         df = pd.DataFrame(self.metrics)
         df.to_csv(self.cfg.results_dir + f"results_{self.cfg.city_tag}.csv", index=False)
         logger.info("Metrics saved → %s", self.cfg.results_dir)
