@@ -33,6 +33,23 @@ def get_approx_fun(fcoeffs, range_=[0,2], nlines=3, theta=False):
     return  theta, a, rms
 
 def LTIFM_reb(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, exogenous_G=False):
+    '''
+    DEPRECATED
+    Solve congestion aware vehicle routing problem.
+    
+    Parameters
+    ----------
+    Demands: demand matrix
+    G: roadgraph
+    fcoeffs: coeffficients for bpr function
+    n: Number of sections in piecewise aprox
+    theta_n: max expected overcapacity, used for calculating piecewise slopes
+    
+    Returns
+    --------
+    sol: dictionary with x, xr, objective and demands
+
+    '''
     env = gp.Env(empty=True)
     env.setParam("OutputFlag",0)
     env.start()
@@ -169,6 +186,24 @@ def LTIFM_reb(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, exogeno
 
 
 def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, nash=False):
+    '''
+    Solve congestion aware vehicle routing problem. Implementation using sparse matrices
+    for optimization. 
+    
+    Parameters
+    ----------
+    Demands: demand matrix
+    G: roadgraph
+    fcoeffs: coeffficients for bpr function
+    n: Number of sections in piecewise aprox
+    theta_n: max expected overcapacity, used for calculating piecewise slopes
+    nash: check if we are doing penetration rate
+    
+    Returns
+    --------
+    sol: dictionary with x, xr, objective and demands
+
+    '''
     node_order = list(G.nodes())
     edge_order = list(G.edges())
 
@@ -179,18 +214,22 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
     capacities = [G[u][v].get("capacity") for u, v in edge_order]    
     cap_arr = np.asarray(capacities)
 
+    # recalculate theta_n based on exogenous flow (if exists)
     if nash:
         exo_flow = [G[u][v]['exo_flow'] for u, v in edge_order]
         max_ratio = np.max(np.array(exo_flow) / np.maximum(cap_arr, 1e-9))
         theta_n = max(theta_n, 1.2*max_ratio)  # 20% headroom
 
+    # create piecewise curve
     fc = fcoeffs.copy()
     if (theta==False) or (a==False):
         theta, a, rms  = get_approx_fun(fcoeffs=fc, nlines=n, range_=[0,theta_n])
 
+    # precompute widths of sections in piecewise approx
     widths = np.diff(theta)
     seg_w = np.outer(widths, cap_arr)
 
+    # make sure demands match expected shape (and - sum on diagonals)
     Dem = np.array(Demands, copy=True, dtype=float)
     row_sums = Dem.sum(axis=1)
     diag = np.diag(Dem)
@@ -206,7 +245,8 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
     e = m.addVars(range(n), range(N_edges), lb=0.0, ub={(l,i): (seg_w[l,i] if l < n-1 else GRB.INFINITY) for l in range(n) for i in range(N_edges)}, name="e")
     m.update()
     
-    if not nash:
+    if not nash:    #check if exo flow should be present
+        # Objective with congestion
         obj = gp.quicksum(\
                 gp.quicksum(edge_times[i] * a[l]/capacities[i] *( \
                 e[l,i] * (0+gp.quicksum(((theta[k + 1] - theta[k])*capacities[i]) for k in range(0,l))) \
@@ -217,6 +257,7 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
                 for i in range(N_edges))
         m.setObjective(obj, GRB.MINIMIZE)
     elif nash:
+        # same objectie, but broken up in parts
         exo_flow = [G[u][v]['exo_flow'] for u, v in edge_order]
         obj_terms = []
         for i in range(N_edges):
@@ -235,11 +276,12 @@ def LTIFM_reb_sparse(Demands, G, fcoeffs, n=3, theta_n=3, a=False, theta=False, 
                         e[l,i] * xp
                     )
                 )
-            # rebalancing penalty (use your weights)
+            # rebalancing penalty
             obj_terms.append(t0 * xr[i]) 
         obj = gp.quicksum(obj_terms)
         m.setObjective(obj, GRB.MINIMIZE)
 
+    # epsilon constraints
     if not nash:
         m.addConstrs(e[l,i]\
                     >=  x[i,:].sum() \

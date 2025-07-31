@@ -7,6 +7,8 @@ import pickle
 from pyproj import Transformer
 from datetime import datetime
 from pathlib import Path
+from dataclasses import fields
+import logging
 
 plt.rcParams.update({
     "font.family": "sans-serif",
@@ -19,6 +21,11 @@ plt.rcParams.update({
     "xtick.labelsize": 15,
     "ytick.labelsize": 15,
 })
+
+LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
+logging.basicConfig(format=LOG_FORMAT)
+logger = logging.getLogger('iamod')
+logger.setLevel(logging.INFO)
 
 def plot_flows(G: nx.DiGraph, dir):
     pos_coords = np.array([G.nodes[i]["pos"] for i in G.nodes()])
@@ -95,21 +102,21 @@ def main() -> None:
     cfg.mu_initial = 1e-2
     cfg.stable_needed = 3
     cfg.demand_multiplier=1
-    cfg.delay_factor=2 / 60
-    cfg.waiting_time=2 / 60
+    cfg.delay_factor=1 / 60 # 1 min
+    cfg.waiting_time=1 / 60 # 1 min
     sim = RidePoolingSimulationCore(cfg)
-    # sim.run()
-    with open("results/NYC_roadgraph_solved.gpickle", "rb") as f:
-        sim.original_G = pickle.load(f)
-    # with open("results/NYC_roadgraph_solved.gpickle", "wb") as f:
-    #     pickle.dump(sim.original_G, f)
-    # with open("results/NYC_supergraph_solved.gpickle", "wb") as f:
-    #     pickle.dump(sim.tNet.G_supergraph, f)
+    sim.run()
+    # with open("results/NYC_roadgraph_solved.gpickle", "rb") as f:
+    #     sim.original_G = pickle.load(f)
+    with open("results/NYC_roadgraph_solved.gpickle", "wb") as f:
+        pickle.dump(sim.original_G, f)
+    with open("results/NYC_supergraph_solved.gpickle", "wb") as f:
+        pickle.dump(sim.tNet.G_supergraph, f)
     plot_flows(sim.original_G, cfg.results_dir)
-    # with open(cfg.results_dir+ "config.txt", "w") as f:
-    #     for field in fields(cfg):
-    #         value = getattr(cfg, field.name)
-    #         f.write(f"{field.name}:{value}\n")
+    with open(cfg.results_dir+ "config.txt", "w") as f:
+        for field in fields(cfg):
+            value = getattr(cfg, field.name)
+            f.write(f"{field.name}:{value}\n")
 
 
 if __name__ == "__main__":

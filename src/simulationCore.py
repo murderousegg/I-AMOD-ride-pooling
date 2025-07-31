@@ -7,17 +7,17 @@ import os
 import pandas as pd
 
 from src.solvers import *
-from src.solvers import _build_snapshot, _solve_cars_gurobi, _solve_cars_gurobi_M
+from src.solvers import _build_snapshot, _solve_cars_gurobi_M
 from src.simConfig import SimulationConfig
 import src.tnet as tnet
 import experiments.build_NYC_subway_net as nyc
-
 import logging
+
 logging.getLogger("fontTools.subset").setLevel(logging.WARNING)
 
 plt.rcParams.update({
-    "font.size": 15,                     # IEEE style prefers 8–10 pt
-    "pdf.fonttype": 42,   # Important: embed fonts correctly in PDF
+    "font.size": 15,
+    "pdf.fonttype": 42,
     "ps.fonttype": 42,
     "legend.fontsize": 12,
     "xtick.labelsize": 15,
@@ -32,7 +32,7 @@ class RidePoolingSimulationCore:
     def __init__(self, cfg: SimulationConfig):
         self.cfg = cfg
         self.metrics: Dict[str, List[float]]
-        # 2.1 Load base road-only network --------------------------------
+        # load base network
         self.tNet, self.tstamp, self.fcoeffs = nyc.build_NYC_net(
             "data/net/NYC/", only_road=True
         )
@@ -41,10 +41,10 @@ class RidePoolingSimulationCore:
         self.tNet.set_g(tnet.perturbDemandConstant(self.tNet.g, self.cfg.demand_multiplier))
         self.tNet.read_node_coordinates("data/pos/NYC.txt")
         self.original_G = self.tNet.G
-        # 2.2 Replace road graphs with pre-built pickles ------------------
+        # load rest of networks
         self._load_gml_graphs()
 
-        # 2.3 Pre-compute helpers ----------------------------------------
+        #precompute helper variables
         self._car_node_idx: Dict[int, int] = {
             node: i for i, node in enumerate(self.tNet.G.nodes())
         }
@@ -53,13 +53,12 @@ class RidePoolingSimulationCore:
         }
         self._n_nodes = len(self._car_node_idx)
         self._car_node_idx_np = dict_to_lookup(self._car_node_idx)
-        self.nash = 0
-
-    # ------------------------------------------------------------------
-    # Public driver
-    # ------------------------------------------------------------------
+        self.nash = 0   #init
 
     def run(self, warm=0) -> None:
+        '''
+        Run base optimization loop between I-AMoD and rp
+        '''
         self._init_metrics()
         mu, r = self.cfg.mu_initial, 2.0
         prev_x = prev2_x = None
@@ -71,21 +70,27 @@ class RidePoolingSimulationCore:
         logger.info("Total initial demand: %.0f", sum(self.tNet.g.values()))
 
         for it in range(warm, self.cfg.max_iterations+warm):
+            # update proximal term
             mu = self._adapt_mu(it, mu, prev_obj, prev2_obj)
+            # solve I-AMoD
             avg_time, x, expected_cars, obj = self._solve_cars(
                 it, mu, prev_x, reb_cars_est, car_ratio_smoothed, r
             )
             logger.info(f"expected number of cars: {expected_cars}")
+            # keep backlog of results
             prev2_x, prev_x = prev_x, x
             prev2_obj, prev_obj = prev_obj, obj
-
+            
             D_rp = self._extract_ridepool_od()
+
             # np.save("temp.npy", D_rp)
             # D_rp = np.load("temp.npy")
-            y, yr, demand_split, gamma_arr = self._compute_pooled(D_rp)
+            
+            y, yr, demand_split, gamma_arr = self._compute_pooled(D_rp) # Do rp algorithm
+            
             total_cars, reb_cars = self._update_road_edge_costs(y, yr)
             
-            if it != 0:
+            if it != 0: # record metrics before escape from convergence
                 self._record_metrics(demand_split, total_cars, reb_cars)
 
             stable_hits = self._check_convergence(
@@ -105,21 +110,17 @@ class RidePoolingSimulationCore:
             if it == 0:
                 self._record_metrics(demand_split, total_cars, reb_cars)
 
-            if stable_hits >= self.cfg.stable_needed:
-                logger.info("Converged after %d iterations", it + 1)
-                break
-
             logger.info("Completed iteration %d", it + 1)
+            # update rp percentage
             r = 1 + self.metrics["double_share"][-1]
+        # save and plot
         self._save_metrics_csv()
         self._plot_mode_share()
-        
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _load_gml_graphs(self) -> None:
+        '''
+        Load both supergraph and (pruned) roadgraph
+        '''
         cfg = self.cfg
         with open(cfg.gml_small, 'rb') as f:
             self.tNet.G = pickle.load(f)
@@ -146,6 +147,9 @@ class RidePoolingSimulationCore:
     # ---------- adaptive-µ -------------------------------------------
 
     def _adapt_mu(self, it: int, mu: float, obj: float | None, obj_prev: float | None) -> float:
+        '''
+        Algorithm for updating proximal term. Only initialize mu once it==2.
+        '''
         if it == 2:
             mu = self.cfg.mu_initial  # reset as in legacy code
         if obj is not None and obj_prev is not None:
@@ -157,8 +161,11 @@ class RidePoolingSimulationCore:
         logger.debug("mu=%.3g", mu)
         return mu
 
-    # ---------- call into CARS solver --------------------------------
     def _solve_cars(self, it, mu, prev_x, reb_cars_est, c_ratio, r):
+        '''
+        Prepare for I-AMoD optimziation call. Set solverParams, create network snapshot
+        (if not present)
+        '''
         params = SolverParams(
             iteration=it,
             mu=mu,
@@ -167,7 +174,8 @@ class RidePoolingSimulationCore:
             vehicle_limit=self.cfg.vehicle_limit,
             c_ratio=c_ratio,
             reb_cars=reb_cars_est,
-            r=r
+            r=r,
+            rho_time=self.cfg.rho_time
         )
         
         if it == 0 or self.nash == 1:
@@ -178,6 +186,9 @@ class RidePoolingSimulationCore:
     # ---------- OD extraction ----------------------------------------
 
     def _extract_ridepool_od(self) -> np.ndarray:
+        '''
+        Convert flows in X to ride-pooling demand matrix
+        '''
         n = self._n_nodes
         D_rp = np.zeros((n, n))
         for u, v, d in self.tNet.G_supergraph.edges(data=True):
@@ -193,6 +204,10 @@ class RidePoolingSimulationCore:
     def _compute_pooled(
         self, D_rp: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float, float], np.ndarray]:
+        '''
+        Load in precomputed dataset of possible rp combinations, call 
+        rp solver.
+        '''
         with np.load(self.cfg.mat_fulllist) as data:
             full_list = data[data.files[0]].astype(np.float32)
         return compute_results(
@@ -209,9 +224,11 @@ class RidePoolingSimulationCore:
             self.cfg.verbose
         )
 
-    # ---------- edge cost update -------------------------------------
-
     def _update_road_edge_costs(self, y: np.ndarray, yr: np.ndarray) -> Tuple[float, float]:
+        '''
+        Update costs with BRP based on flow and capacity in real road network. Also set flow
+        in roadgraph.
+        '''
         total_cars = reb_cars = 0.0
         for k, (u, v) in enumerate(self.original_G.edges()):
             edge = self.original_G[u][v]
@@ -224,7 +241,6 @@ class RidePoolingSimulationCore:
             edge['flowRebalancing'] = yr[k]
         return total_cars, reb_cars
 
-    # ---------- convergence check ------------------------------------
 
     def _check_convergence(
         self,
@@ -236,6 +252,9 @@ class RidePoolingSimulationCore:
         total_cars: float,
         stable_hits: int,
     ) -> int:
+        '''
+        If N_cars AND (x or obj) within tolerances increment stablility counter.
+        '''
         if x_prev is not None:
             # for the cars, take 2% overhead since we are approaching the solution anyway
             if np.linalg.norm(x.sum(axis=1) - x_prev.sum(axis=1)) < self.cfg.tol_x and total_cars - 0.02 * total_cars < self.cfg.vehicle_limit:
@@ -255,7 +274,7 @@ class RidePoolingSimulationCore:
                  seq0_arr, gammas, D_rp, Tmat):
         """
         Accumulates OD_detour and waiting-time matrices for a slice `chunk_idx`
-        (array of row indices).  Runs in a Joblib worker; uses only NumPy.
+        (array of row indices). 
         """
         n  = D_rp.shape[0]
         OD = np.zeros((n, n), dtype=np.float64)
@@ -283,6 +302,9 @@ class RidePoolingSimulationCore:
         return OD, WT
 
     def _apply_new_times(self, Gs:nx.DiGraph, total_delay):
+        '''
+        Applies new shortests paths + delays to direct rp arcs in supergraph
+        '''
         for u, v, d in Gs.edges(data=True):
             if d["type"] == "rp":
                 base = nx.shortest_path_length(self.original_G, source=s2int(u), target=s2int(v), weight="t_1")
@@ -296,13 +318,16 @@ class RidePoolingSimulationCore:
                 d["t_1"] = d["t_0"]
 
     def _update_supergraph_costs(self, D_rp: np.ndarray, gamma_arr: np.ndarray) -> None:
-        # ------------------------------------------------------------------
-        # 0)  pre-compute shortest-path travel times once for this iteration
-        # ------------------------------------------------------------------
+        '''
+        Update the costs in the supergraph based on rp optimzation. Calculates
+        delays (temporal and spatial), calculates new shortest routes and applies in
+        't_1'
+        '''
         n = self._n_nodes
         Tmat = np.zeros((n, n), dtype=np.float64)
         G_nodes = list(self.tNet.G.nodes())
 
+        # precompute shortest paths through dijkstra algorithm
         for src_idx, src_raw in enumerate(G_nodes):
             lengths = nx.single_source_dijkstra_path_length(
                 self.original_G, source=src_raw, weight="t_1")
@@ -310,13 +335,11 @@ class RidePoolingSimulationCore:
                 if dst_raw in G_nodes:
                     dst_idx = self._car_node_idx[dst_raw]
                     Tmat[src_idx, dst_idx] = d
-
-        # ------------------------------------------------------------------
-        # 1)  prepare arrays for Joblib
-        # ------------------------------------------------------------------
+        # load in possible combinations
         with np.load(self.cfg.mat_fulllist) as data:
             full_list = data[data.files[0]].astype(np.float32)
 
+        # mask for unused combinations
         mask       = gamma_arr > 1e-3
         rows_used  = full_list[mask]
         gammas     = gamma_arr[mask].astype(np.float64)
@@ -327,9 +350,7 @@ class RidePoolingSimulationCore:
         ii2_arr = np.take(self._car_node_idx_np, rows_used[:, 6].astype(np.int32))
         seq0_arr = rows_used[:, 7].astype(np.int8)   # 1 or 0  (for [1 2 1 2] vs [1 2 2 1])
 
-        # ------------------------------------------------------------------
-        # 2)  parallel accumulation with Joblib
-        # ------------------------------------------------------------------
+        # prepare for parallel processing
         idx        = np.arange(len(rows_used))
         n_jobs     = min(cpu_count(), max(1, len(idx)//10_000))  # heuristic
         chunks     = np.array_split(idx, n_jobs)
@@ -340,7 +361,6 @@ class RidePoolingSimulationCore:
             for chunk in chunks
         )
 
-        # reduce
         OD_delays = sum(p[0] for p in partials)
         Et        = sum(p[1] for p in partials)
 
@@ -365,6 +385,7 @@ class RidePoolingSimulationCore:
         pt_flow=0
         rp_flow=0
         reb_flow=0
+        # compute time based modal shares in hours
         for u,v,d in self.tNet.G_supergraph.edges(data=True):
             if d['type'] == "'":
                 ped_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']
@@ -374,9 +395,11 @@ class RidePoolingSimulationCore:
                 pt_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']
             elif d['type'] == 'rp':
                 rp_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']
+        # rebalancing flows
         for u,v in self.original_G.edges():
             reb_flow += self.original_G[u][v]['flowRebalancing']*self.original_G[u][v]['t_1']
         orig, solo, pooled, solo_perc, pooled_perc = demand_stats
+        # store
         self.metrics["single_share"].append(solo_perc)
         self.metrics["double_share"].append(pooled_perc)
         self.metrics["triple_share"].append(max(0.0, 1 - solo_perc - pooled_perc))

@@ -11,7 +11,7 @@ from scipy.spatial.distance import cdist
 import matplotlib.pyplot as plt
 
 EARTH_R = 6_371_000.0
-# ---------- load base network ---------------------------------------------
+# load network and index maps
 tNet, _, _ = nyc.build_NYC_net("data/net/NYC/", only_road=True)
 tNet.read_node_coordinates("data/pos/NYC.txt")
 tNet_coords = np.array([tNet.G.nodes[i]["pos"] for i in tNet.G.nodes()])
@@ -19,6 +19,7 @@ tNet_coords = tNet_coords[:, ::-1]
 node_list = list(tNet.G.nodes())                       # index → label
 node_idx_map = {n: i for i, n in enumerate(node_list)} # label → index
 edge_list = list(tNet.G.edges())
+
 def latlon_to_xy(lat: np.ndarray,
                  lon: np.ndarray,
                  lat0: float | None = None) -> np.ndarray:
@@ -42,6 +43,7 @@ def latlon_to_xy(lat: np.ndarray,
     y = EARTH_R * (lat_rad - lat_rad.mean())
     return np.column_stack((x, y))              # (N, 2)
 
+### unused greedy pruning algorithm
 def prune_greedy(lat: Sequence[float],
                            lon: Sequence[float],
                            k_keep: int,
@@ -86,8 +88,19 @@ def prune_greedy(lat: Sequence[float],
 
     return keep_idx, nearest_kept
 
-#### k-median implementation for optimal pruning
 def solve_kmedian(lat: Sequence[float], lon: Sequence[float], k_keep: int) -> Tuple[np.ndarray, Dict[int, int]]:
+    '''
+    k-medians implementation with GuRoBi for pruning nodes from a network. 
+    Tune max_dist for speed optimization, but make sure largest distance
+    from node to closest pruned node < max_dist.
+    Prints stats on average distances from all nodes to pruned nodes
+    
+    Returns:
+    ---------
+    centers: array containing pruned nodes (centers of clusters)
+    assignment: reverse map of centers
+    XY: Coordinates of x and y for all nodes
+    '''
     XY = latlon_to_xy(lat, lon)
     N = len(XY)
     D = cdist(XY, XY)  # distance matrix (N x N)
@@ -137,14 +150,17 @@ def solve_kmedian(lat: Sequence[float], lon: Sequence[float], k_keep: int) -> Tu
 
     return np.array(centers), assignment, XY
 
-keep, mapping, XY = solve_kmedian(tNet_coords[:,0], tNet_coords[:,1], k_keep=100)
-roadGraph = nx.DiGraph()
 
+keep, mapping, XY = solve_kmedian(tNet_coords[:,0], tNet_coords[:,1], k_keep=100)
+
+# create pruned roadgraph
+roadGraph = nx.DiGraph()
 position = {}
 for node in keep:
     roadGraph.add_node(node_list[node], position = XY[node,:])
     position[node_list[node]]=XY[node,:]
 
+# create new demand dictionary
 new_g = {}
 for (orig, dest), q in tNet.g.items():
     dest_new = node_list[mapping[node_idx_map[int(dest)]]]
@@ -152,15 +168,16 @@ for (orig, dest), q in tNet.g.items():
     orig_new = node_list[mapping[node_idx_map[int(orig)]]]
     new_g[(orig_new, dest_new)] = new_g.get((orig_new, dest_new), 0.0) + q
 fig, ax = plt.subplots(figsize=(5,10))
-#edges = list(G.edges())
-#nx.draw(G, pos, node_color='b', edgelist=edges, edge_color=weights, width=width, edge_cmap=cmap)
+
+# draw pruned roadgraph
 nx.draw(roadGraph, position, node_color='k',  width=0.3, edge_cmap=plt.cm.Blues, arrowsize=4, node_size=10, alpha=0.7,
 connectionstyle='arc3, rad=0.04')
 plt.savefig("results/network_kept_nodes.pdf", format="pdf")
 
-
+# rename demand dictionary withi walking and destination markers
 tNet.g = {(f"{k[0]}'", f"{k[1]}''"): v for k, v in new_g.items()}
 
+# save
 with open("data/gml/NYC_small_demands.gpickle", "wb") as f:
     pickle.dump(tNet.g, f)
 with open("data/gml/NYC_small_roadgraph.gpickle", "wb") as f:

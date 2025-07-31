@@ -14,6 +14,7 @@ class SimulationConfig:
     demand_multiplier: float = 1
     Tmax:float=0.5
     verbose: bool = True
+    rho_time = 1e-6
 
     # adaptive-µ controls
     mu_initial: float = 1e-4

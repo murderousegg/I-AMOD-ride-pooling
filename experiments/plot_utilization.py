@@ -1,12 +1,9 @@
 from __future__ import annotations
-from src.simulationCore import RidePoolingSimulationCore
-from src.simConfig import SimulationConfig
+
 from src.solvers import *
 import matplotlib.pyplot as plt
 import pickle
 from pyproj import Transformer
-from datetime import datetime
-from pathlib import Path
 import pandas as pd
 
 plt.rcParams.update({
@@ -15,7 +12,7 @@ plt.rcParams.update({
     "ps.fonttype": 42,
     "legend.fontsize": 25,
     "xtick.labelsize": 17,
-    "ytick.labelsize": 25,
+    "ytick.labelsize": 17,
     "text.latex.preamble": r'\usepackage{dsfont}',
     "axes.labelsize": 20,
 })
@@ -54,7 +51,7 @@ def plot_flows(G1: nx.DiGraph, G2: nx.DiGraph, G3: nx.DiGraph, G4: nx.DiGraph) -
     edge_colors3 = [data["utilization"] for _, _, data in G3.edges(data=True)]
     edge_colors4 = [data["utilization"] for _, _, data in G4.edges(data=True)]
     # vmax = max(max(edge_colors1), max(edge_colors2), max(edge_colors3))
-    vmax=1.5
+    vmax=1.2
     fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(10,15), constrained_layout=True)
     edges = nx.draw_networkx_edges(
         G1,
@@ -117,10 +114,15 @@ def plot_flows(G1: nx.DiGraph, G2: nx.DiGraph, G3: nx.DiGraph, G4: nx.DiGraph) -
     ax[1,1].axis("off")
     # plt.tight_layout()
     # fig.suptitle(r"Road Utilization With Varying Demand and Vehicle Limits", fontsize=27)
-    titles = [r"$N_{\mathrm{cars}} = 10\times 10^3,\ \phi = 1$",\
+    # titles = [r"$N_{\mathrm{cars}} = 10\times 10^3,\ \phi = 1$",\
+    #           r"$N_{\mathrm{cars}} = 20\times 10^3,\ \phi = 2$",\
+    #           r"$N_{\mathrm{cars}} = 30\times 10^3,\ \phi = 3$",\
+    #           r"$N_{\mathrm{cars}} = 40\times 10^3,\ \phi = 4$"]
+
+    titles = [r"$N_{\mathrm{cars}} = 5\times 10^3,\ \phi = 0.5$",\
+              r"$N_{\mathrm{cars}} = 10\times 10^3,\ \phi = 1$",\
               r"$N_{\mathrm{cars}} = 20\times 10^3,\ \phi = 2$",\
-              r"$N_{\mathrm{cars}} = 30\times 10^3,\ \phi = 3$",\
-              r"$N_{\mathrm{cars}} = 40\times 10^3,\ \phi = 4$"]
+              r"$N_{\mathrm{cars}} = 30\times 10^3,\ \phi = 3$"]
 
     for i in range(4):
         ax[i//2, i%2].annotate(
@@ -271,7 +273,8 @@ def bar_plot_final_result(df1:pd.DataFrame, df2:pd.DataFrame, df3:pd.DataFrame, 
     group_spacing = 0.2
     x_positions = []
     lim_labels = []
-    limits = [r'5',r'10', r'15', r'15', r'20', r'25', r'25', r'30', r'35', r'35', r'40', r'45']
+    # limits = [r'5',r'10', r'15', r'15', r'20', r'25', r'25', r'30', r'35', r'35', r'40', r'45']
+    limits = [r'2.5', r'5', r'7.5', r'5',r'10', r'15', r'15', r'20', r'25', r'25', r'30', r'35']
     group_centers = []
     for i in range(4):
         group_start = i * (2 * bar_width + group_spacing)
@@ -284,7 +287,7 @@ def bar_plot_final_result(df1:pd.DataFrame, df2:pd.DataFrame, df3:pd.DataFrame, 
     bottom = np.zeros(len(x_positions))
     modes = ['rp_flow', 'pt_flow', 'bike_flow', 'ped_flow']
     for mode, label in zip(modes, legend_labels):
-        values = plot_df[mode].values
+        values = plot_df[mode].values / 1e4
         ax.bar(x_positions, values, bar_width, bottom=bottom, label=label, edgecolor='black', linewidth=0.5)
         bottom += values
 
@@ -292,8 +295,9 @@ def bar_plot_final_result(df1:pd.DataFrame, df2:pd.DataFrame, df3:pd.DataFrame, 
     ax.set_xticklabels(lim_labels, rotation=0)
     for i in range(4):
         x_center = group_centers[i]
-        ax.text(x_center, -15000, [r'$\phi = 1$', r'$\phi = 2$', r'$\phi = 3$', r'$\phi = 4$'][i], ha='center', va='top', fontsize=20)
-    ax.set_ylabel(r'Time-Based Modal Share ($\mathrm{h}$)')
+        # ax.text(x_center, -0.09, [r'$\phi = 1$', r'$\phi = 2$', r'$\phi = 3$', r'$\phi = 4$'][i], ha='center', va='top', transform=ax.get_xaxis_transform(), fontsize=20)
+        ax.text(x_center, -0.09, [r'$\phi = 0.5$', r'$\phi = 1$', r'$\phi = 2$', r'$\phi = 3$'][i], ha='center', va='top', transform=ax.get_xaxis_transform(), fontsize=20)
+    ax.set_ylabel(r'Time-Based Modal Share ($\times 10^4 \mathrm{h}$)')
     ax.set_xlabel(r"$N_{\mathrm{cars,max}}$ (top, $\times 10^3$) and Demand Multiplier (bottom)", labelpad=30)
     # ax.set_title(r"Modal Share Based on Demand and Vehcle Limit", fontsize=25)
     plt.legend(legend_labels ,loc='upper left', fontsize=16)
@@ -302,7 +306,8 @@ def bar_plot_final_result(df1:pd.DataFrame, df2:pd.DataFrame, df3:pd.DataFrame, 
     ax2.set_ylabel(r"($\mathrm{\%}$) of rp requests pooled", color='tab:purple')
     ax2.plot(x_positions, [i*100 for i in plot_df['double_share'].values], linestyle='', marker='o', markersize=12, markeredgewidth=0.5, markeredgecolor='black', color='tab:purple')
     ax2.tick_params(axis='y', labelcolor='tab:purple')
-    ax2.set_ylim([97,100.2])
+    # ax2.set_ylim([97,100.2])
+    ax2.set_ylim([94,100.2])
     plt.grid(axis='y', alpha = 0.3)
 
     plt.tight_layout()
@@ -310,13 +315,21 @@ def bar_plot_final_result(df1:pd.DataFrame, df2:pd.DataFrame, df3:pd.DataFrame, 
     plt.show()
 
 def main() -> None:
-    with open("results/NYC_10000_1/NYC_roadgraph_solved.gpickle", "rb") as f:
+    # with open("results/NYC_10000_1/NYC_roadgraph_solved.gpickle", "rb") as f:
+    #     rg1 = pickle.load(f)
+    # with open("results/NYC_20000_2/NYC_roadgraph_solved.gpickle", "rb") as f:
+    #     rg2 = pickle.load(f)
+    # with open("results/NYC_30000_3/NYC_roadgraph_solved.gpickle", "rb") as f:
+    #     rg3 = pickle.load(f)
+    # with open("results/NYC_40000_4/NYC_roadgraph_solved.gpickle", "rb") as f:
+    #     rg4 = pickle.load(f)
+    with open("results/NYC/NYC_5k_05phi/NYC_roadgraph_solved.gpickle", "rb") as f:
         rg1 = pickle.load(f)
-    with open("results/NYC_20000_2/NYC_roadgraph_solved.gpickle", "rb") as f:
+    with open("results/NYC/NYC_10k_1phi/NYC_roadgraph_solved.gpickle", "rb") as f:
         rg2 = pickle.load(f)
-    with open("results/NYC_30000_3/NYC_roadgraph_solved.gpickle", "rb") as f:
+    with open("results/NYC/NYC_20k_2phi/NYC_roadgraph_solved.gpickle", "rb") as f:
         rg3 = pickle.load(f)
-    with open("results/NYC_40000_4/NYC_roadgraph_solved.gpickle", "rb") as f:
+    with open("results/NYC/NYC_30k_3phi/NYC_roadgraph_solved.gpickle", "rb") as f:
         rg4 = pickle.load(f)
 
     plot_flows(rg1, rg2, rg3, rg4)
@@ -333,18 +346,18 @@ def main() -> None:
 
 
     ### load results df
-    df1 = pd.read_csv("results/NYC_5000_1/results_NYC.csv")
-    df1_2 = pd.read_csv("results/NYC_10000_1/results_NYC.csv")
-    df1_3 = pd.read_csv("results/NYC_15000_1/results_NYC.csv")
-    df2 = pd.read_csv("results/NYC_15000_2/results_NYC.csv")
-    df2_2 = pd.read_csv("results/NYC_20000_2/results_NYC.csv")
-    df2_3 = pd.read_csv("results/NYC_25000_2/results_NYC.csv")
-    df3 = pd.read_csv("results/NYC_25000_3/results_NYC.csv")
-    df3_2 = pd.read_csv("results/NYC_30000_3/results_NYC.csv")
-    df3_3 = pd.read_csv("results/NYC_35000_3/results_NYC.csv")
-    df4 = pd.read_csv("results/NYC_35000_4/results_NYC.csv")
-    df4_2 = pd.read_csv("results/NYC_40000_4/results_NYC.csv")
-    df4_3 = pd.read_csv("results/NYC_45000_4/results_NYC.csv")
+    df1 = pd.read_csv("results/NYC/NYC_2500_05phi/results_NYC.csv")
+    df1_2 = pd.read_csv("results/NYC/NYC_5k_05phi/results_NYC.csv")
+    df1_3 = pd.read_csv("results/NYC/NYC_7500_05phi/results_NYC.csv")
+    df2 = pd.read_csv("results/NYC/NYC_5k_1phi/results_NYC.csv")
+    df2_2 = pd.read_csv("results/NYC/NYC_10k_1phi/results_NYC.csv")
+    df2_3 = pd.read_csv("results/NYC/NYC_15k_1phi/results_NYC.csv")
+    df3 = pd.read_csv("results/NYC/NYC_15k_2phi/results_NYC.csv")
+    df3_2 = pd.read_csv("results/NYC/NYC_20k_2phi/results_NYC.csv")
+    df3_3 = pd.read_csv("results/NYC/NYC_25k_2phi/results_NYC.csv")
+    df4 = pd.read_csv("results/NYC/NYC_25k_3phi/results_NYC.csv")
+    df4_2 = pd.read_csv("results/NYC/NYC_30k_3phi/results_NYC.csv")
+    df4_3 = pd.read_csv("results/NYC/NYC_35k_3phi/results_NYC.csv")
 
     bar_plot_final_result(df1, df2, df3, df4, df1_2, df2_2, df3_2,df4_2, df1_3, df2_3, df3_3, df4_3)
 

@@ -10,18 +10,12 @@ from datetime import datetime
 from pathlib import Path
 from dataclasses import fields
 import matplotlib.pyplot as plt
+import logging
 
-# plt.rcParams.update({
-#     "font.size": 25,                     # IEEE style prefers 8–10 pt
-#     "pdf.fonttype": 42,   # Important: embed fonts correctly in PDF
-#     "ps.fonttype": 42,
-#     "legend.fontsize": 25,
-#     "xtick.labelsize": 17,
-#     "ytick.labelsize": 25,
-#     "text.latex.preamble": r'\usepackage{dsfont}',
-#     "axes.labelsize": 20,
-# })
-
+LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
+logging.basicConfig(format=LOG_FORMAT)
+logger = logging.getLogger('iamod')
+logger.setLevel(logging.INFO)
 
 class penrateSimulation(RidePoolingSimulationCore):
     def __init__(self, cfg: SimulationConfig):

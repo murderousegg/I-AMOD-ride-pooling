@@ -61,6 +61,7 @@ def plot_penrate_comparison() -> None:
     cost_legend.extend(marker_legend)
     ax.legend(handles=cost_legend, loc='upper right')
     # plt.title("Effects of Penetration Rate on Costs")
+    plt.grid(alpha=0.3)
     plt.tight_layout()
     plt.savefig("results/penrate/penRate_comparison.pdf", format="pdf")
     plt.show()
