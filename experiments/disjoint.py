@@ -10,17 +10,17 @@ from pathlib import Path
 from dataclasses import fields
 import logging
 
-plt.rcParams.update({
-    "font.family": "sans-serif",
-    "font.serif": ["Times"],
-    "font.size": 13,                     # IEEE style prefers 8–10 pt
-    "pdf.fonttype": 42,   # Important: embed fonts correctly in PDF
-    "ps.fonttype": 42,
-    "text.usetex": True,
-    "legend.fontsize": 12,
-    "xtick.labelsize": 15,
-    "ytick.labelsize": 15,
-})
+# plt.rcParams.update({
+#     "font.family": "sans-serif",
+#     "font.serif": ["Times"],
+#     "font.size": 13,                     # IEEE style prefers 8–10 pt
+#     "pdf.fonttype": 42,   # Important: embed fonts correctly in PDF
+#     "ps.fonttype": 42,
+#     "text.usetex": True,
+#     "legend.fontsize": 12,
+#     "xtick.labelsize": 15,
+#     "ytick.labelsize": 15,
+# })
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
 logging.basicConfig(format=LOG_FORMAT)
@@ -94,8 +94,9 @@ def main() -> None:
 
     # create results directory
     now_string = datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
-    cfg.results_dir = f"results/NYC_{now_string}/"
-    Path(cfg.results_dir).mkdir(parents=True, exist_ok=True)
+    # cfg.results_dir = f"results/NYC_{now_string}/"
+
+    # Path(cfg.results_dir).mkdir(parents=True, exist_ok=True)
     ###
     cfg.max_iterations = 1
     cfg.vehicle_limit = 15000
@@ -104,6 +105,9 @@ def main() -> None:
     cfg.demand_multiplier=1
     cfg.delay_factor=1 / 60 # 1 min
     cfg.waiting_time=1 / 60 # 1 min
+
+    cfg.results_dir = f"results/{cfg.vehicle_limit}_{cfg.demand_multiplier}/"
+    Path(cfg.results_dir).mkdir(parents=True, exist_ok=True)
     sim = RidePoolingSimulationCore(cfg)
     sim.run()
     # with open("results/NYC_roadgraph_solved.gpickle", "rb") as f:

@@ -118,7 +118,6 @@ def _build_snapshot(tnet) -> NetSnapshot:
     # ensure row-sum zero (supply = –demand) per origin
     for o, i in origin_idx.items():
         demand[i, node_idx[o]] = -demand[i].sum()
-        
     return NetSnapshot(Binc=Binc, edge_order=edge_order, node_order=node_order, origins=origins, demand_matrix=demand, alpha_o=alpha_o)
 
 @timeit
@@ -219,7 +218,6 @@ def _solve_cars_gurobi_M(tnet, snap: NetSnapshot, params: SolverParams) -> CARSR
     '''
     m = gp.Model(f"CARS{params.iteration}")
     _configure_gurobi(m, params)
-
     # variables -------------------------------------------------------
     x = m.addMVar((snap.N_edges, len(snap.origins)), name="x", lb=0)
     xr = None
@@ -355,9 +353,7 @@ def _solve_cars_gurobi_fair(tnet, snap: NetSnapshot, params: SolverParams) -> tu
 
     logger.info(f"Fairness objective: {obj}")
     cars_expected = expr.getValue()
-    avg_time_suff = []
-    for i in range(len(snap.origins)):
-        avg_time_suff.append(expr_suff[i].getValue())
+    avg_time_suff = [expr.getValue() for expr in expr_suff]
     # write flows back for downstream code
     for i, (u, v) in enumerate(snap.edge_order):
         tnet.G_supergraph[u][v]["flowNoRebalancing"] = flows[i]

@@ -207,8 +207,8 @@ class tNet():
                 G2.add_edge(str(i) + layer_symb, str(j) + layer_symb, length=layer[i][j]['length'],
                            t_0=layer[i][j]['t_0'], capacity=layer[i][j]['capacity'], type=layer_symb)
             for i in layer.nodes():
-                G2.add_edge(f"{i}'", str(i) + layer_symb, t_0=5/60, capacity=99999, type='f', length=0.1)
-                G2.add_edge(str(i) + layer_symb, f"{i}'", t_0=1/60, capacity=99999, type='f', length=0.1)
+                G2.add_edge(f"{i}'", str(i) + layer_symb, t_0=5/60, capacity=99999, type='f' + layer_symb, length=0.1)
+                G2.add_edge(str(i) + layer_symb, f"{i}'", t_0=1/60, capacity=99999, type='f' + layer_symb, length=0.1)
         else:
             for i, j in layer.edges():
                 G2.add_edge(str(i) + layer_symb, str(j) + layer_symb, length=layer[i][j]['length'],

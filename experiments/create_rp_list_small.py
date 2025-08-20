@@ -8,19 +8,15 @@
 import numpy as np
 from joblib import Parallel, delayed
 from tqdm import tqdm
-from scipy import io
 import networkx as nx
-from src.LTIFM2_SP import LTIFM2_SP, LTIFM2_SP_dests
+from src.LTIFM2_SP import LTIFM2_SP_dests
 import os
-import src.tnet as tnet
 from gurobipy import *
 import experiments.build_NYC_subway_net as nyc
 import pickle
 import re
 
 CITY_FOLDER = "NYC"
-WAITINGTIME = 2/60
-DELAY = 0.1
 tNet, tstamp, fcoeffs = nyc.build_NYC_net('data/net/NYC/', only_road=True)
 
 
@@ -156,7 +152,7 @@ def main():
     
     solPart = A1_SP()
     # # # ### create solutions for different amount of linear combinations
-    # solPart = np.load(f"{CITY_FOLDER}/solPart_pyth_{CITY_FOLDER}.npy", allow_pickle=True)
+    solPart = np.load(f"{CITY_FOLDER}/solPart_pyth_{CITY_FOLDER}.npy", allow_pickle=True)
     A2_LinearComb2(solPart, dests)
    
 

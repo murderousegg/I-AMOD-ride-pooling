@@ -98,7 +98,8 @@ class penrateSimulation(RidePoolingSimulationCore):
         final_metrics = {k: v[-1] for k, v in self.metrics.items()}
         IAMoDFlow = final_metrics["reb_flow"] + final_metrics["ped_flow"] + final_metrics["bike_flow"] + final_metrics["pt_flow"] + final_metrics["rp_flow"]
         IAMoDCosts = IAMoDFlow/sum(self.tNet.g.values())
-        privateFlow = sum([self.tNet_private.G[i][j]['flow'] * self.original_G[i][j]['t_1'] for i,j in self.original_G.edges()])
+        privateFlow = sum([self.tNet_private.G[i][j]['flow'] * self.original_G[i][j]['t_1'] for i,j in self.original_G.edges()])\
+              + 2/60 * sum(self.tNet_private.g.values()) # compensate for startup time
         privateCosts = privateFlow/sum(self.tNet_private.g.values())
         totCost = ((IAMoDFlow+privateFlow)/sum(self.g.values()))
         self.penrate_metrics["reb_flow"].append(final_metrics["reb_flow"])

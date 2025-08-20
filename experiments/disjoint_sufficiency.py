@@ -1,16 +1,19 @@
 from src.simulationCore import RidePoolingSimulationCore
 from src.simConfig import SimulationConfig
 import experiments.build_NYC_subway_net as nyc
-import src.tnet as tnet
 import pickle
-from typing import Dict, List
 from src.solvers import *
-import pandas as pd
 from src.solvers import _build_snapshot, _solve_cars_gurobi_fair
 import matplotlib.pyplot as plt
 from datetime import datetime
 from pathlib import Path
 from dataclasses import fields
+import logging
+
+LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
+logging.basicConfig(format=LOG_FORMAT)
+logger = logging.getLogger('iamod')
+logger.setLevel(logging.INFO)
 
 class sufficiencySimulation(RidePoolingSimulationCore):
     def __init__(self, cfg: SimulationConfig):
@@ -92,17 +95,43 @@ class sufficiencySimulation(RidePoolingSimulationCore):
         (res, obj_dict) = _solve_cars_gurobi_fair(self.tNet, snap, params)
         return res.avg_time, res.x_vec, res.expected_cars, res.obj_val, obj_dict
 
+    def _weighted_percentile(self, data, weights, percentiles):
+        """Return weighted percentiles of 1-D `data`."""
+        data = np.asarray(data)
+        weights = np.asarray(weights)
+        sorter = np.argsort(data)
+        data_sorted = data[sorter]
+        w_sorted = weights[sorter]
+
+        cdf = np.cumsum(w_sorted)
+        cdf /= cdf[-1]
+        return np.interp(np.asarray(percentiles) / 100.0, cdf, data_sorted)
+
     def _bin_results(self, avg_time, x, bin_width_min=1):
-        avg_time = np.asarray(avg_time) * 60  # Convert from hours to minutes
+        avg_time_min = np.asarray(avg_time) * 60  # Convert from hours to minutes
         alpha_o = self._cars_snapshot.alpha_o
 
+        # stats
+        mean_w = np.average(avg_time_min, weights=alpha_o)
+        var_w = np.average((avg_time_min - mean_w) ** 2, weights=alpha_o)
+        std_w = np.sqrt(var_w)
+        cv_w = std_w / mean_w
+        p50, p85, p90, p95 = self._weighted_percentile(
+            avg_time_min, alpha_o, [50, 85, 90, 95])
+
+        print(f"Current iteration Trip-time stats (min): "
+          f"mean={mean_w:.2f}, std={std_w:.2f}, CV={cv_w:.2f}, "
+          f"P50={p50:.2f}, P85={p85:.2f}, "
+          f"P90={p90:.2f}, P95={p95:.2f}")
+
+
         # Define bin edges in minutes
-        max_time = np.ceil(avg_time.max())
+        max_time = np.ceil(avg_time_min.max())
         bin_edges = np.arange(0, max_time + bin_width_min, bin_width_min)
         num_bins = len(bin_edges) - 1
 
         # Bin assignments
-        bin_ids = np.digitize(avg_time, bin_edges, right=False) - 1
+        bin_ids = np.digitize(avg_time_min, bin_edges, right=False) - 1
         bin_ids = np.clip(bin_ids, 0, num_bins - 1)
 
         # Bin centers for plotting
@@ -118,7 +147,6 @@ class sufficiencySimulation(RidePoolingSimulationCore):
         return binned_x, binned_alphas, binned_times
 
 
-
     def _plot_sufficiency_share(self, avg_time, it, x, obj_dict):
         binned_x, binned_alphas, binned_times = self._bin_results(avg_time, x, bin_width_min=0.5)
 
@@ -129,13 +157,13 @@ class sufficiencySimulation(RidePoolingSimulationCore):
 
         for idx, (u, v, d) in enumerate(self.tNet.G_supergraph.edges(data=True)):
             t_1 = self.tNet.G_supergraph[u][v]['t_1']
-            if d['type'] == "'":
+            if "'" in d['type']:
                 ped_flow += binned_x[idx, :] * t_1
-            elif d['type'] == "b":
+            elif "b" in d['type']:
                 bike_flow += binned_x[idx, :] * t_1
-            elif d['type'] == 's':
+            elif 's' in d['type']:
                 pt_flow += binned_x[idx, :] * t_1
-            elif d['type'] == 'rp':
+            elif 'rp' in d['type']:
                 rp_flow += binned_x[idx, :] * t_1
 
         modal_data = np.vstack([rp_flow, pt_flow, bike_flow, ped_flow]) * 1e-4
@@ -148,14 +176,14 @@ class sufficiencySimulation(RidePoolingSimulationCore):
         for data, label, color in zip(modal_data, labels, colors):
             ax1.bar(
                 binned_times, data, bottom=bottom, label=label, color=color,
-                width=0.4, edgecolor='black', linewidth=1
+                width=0.4, edgecolor='black', linewidth=0.5
             )
             bottom += data
-        
-        ax1.axvline(self.Tmax * 60, color='r', linestyle='dashed', linewidth=1, label=r'$T_{\max}$')
+        ax1.set_xlim(0,25)
+        ax1.axvline(self.Tmax * 60, color='r', linestyle='dashed', linewidth=1.5, label=r'$T_{\max}$')
         # plt.text(.01, .3, f'Sufficiency obj: {obj_dict['suff']}\nTime obj: {obj_dict['base']}\nProximal term: {obj_dict['mu']}',\
         #           ha='left', va='top', transform=ax1.transAxes, fontsize=13)
-        ax1.set_xlabel(r'Average time per request ($min$)', fontsize = 20)
+        ax1.set_xlabel(r'Average time per request ($\mathrm{min}$)', fontsize = 20)
         ax1.set_ylabel(r'Time-Based Modal Share ($\times 10^4$ $\mathrm{h}$)', fontsize = 20)
         # ax1.set_title(fr"Commute Sufficiency $T_{{\max}} = {self.cfg.Tmax}$, $\phi = {self.cfg.demand_multiplier}$ and $N_{{\mathrm{{cars,max}}}} = {self.cfg.vehicle_limit/1000} \times 10^3$", fontsize=18)
         avg_all = np.average(binned_times, weights=binned_alphas)
@@ -193,8 +221,8 @@ def main() -> None:
     cfg.max_iterations = 15
     cfg.vehicle_limit = 25000
     cfg.mu_initial = 1e-2
-    cfg.stable_needed = 3
-    cfg.demand_multiplier=3
+    cfg.stable_needed = 2
+    cfg.demand_multiplier=2
     cfg.delay_factor=1 / 60
     cfg.waiting_time=1 / 60
     cfg.tol_obj = 0.1

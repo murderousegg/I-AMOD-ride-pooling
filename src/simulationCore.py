@@ -116,6 +116,7 @@ class RidePoolingSimulationCore:
         # save and plot
         self._save_metrics_csv()
         self._plot_mode_share()
+        return x
 
     def _load_gml_graphs(self) -> None:
         '''
@@ -387,13 +388,13 @@ class RidePoolingSimulationCore:
         reb_flow=0
         # compute time based modal shares in hours
         for u,v,d in self.tNet.G_supergraph.edges(data=True):
-            if d['type'] == "'":
+            if "'" in d['type']:
                 ped_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']
-            elif d['type'] == "b":
+            elif "b" in d['type']:
                 bike_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']
-            elif d['type'] == 's':
+            elif 's' in d['type']:
                 pt_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']
-            elif d['type'] == 'rp':
+            elif 'rp' in d['type']:
                 rp_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']
         # rebalancing flows
         for u,v in self.original_G.edges():
