@@ -216,6 +216,7 @@ def _solve_cars_gurobi_M(tnet, snap: NetSnapshot, params: SolverParams) -> CARSR
     '''
     Vehicle routing solver using MVars and matrix operations for performance.
     '''
+    
     m = gp.Model(f"CARS{params.iteration}")
     _configure_gurobi(m, params)
     # variables -------------------------------------------------------
@@ -313,6 +314,16 @@ def _solve_cars_gurobi_fair(tnet, snap: NetSnapshot, params: SolverParams) -> tu
     Ride-pooling solver for the commute sufficiency objective. Tune rho_time for tradeoff
     minimum time and commute sufficiency.
     '''
+    #TODO: sustainabilty: 
+    # 30g/km per passenger subway
+    # 60 (lightweight vehicle) to 110 (SUV)
+    # biking and walking around 1 g/km?
+    # why wouldnt everyone bike? need some time weight? or something?
+
+    # biking: div 25
+    # walking: div 50
+    # pt: div 4
+    # car: normal
     m = gp.Model(f"CARS{params.iteration}")
     _configure_gurobi(m, params)
     # variables -------------------------------------------------------
@@ -482,7 +493,7 @@ def compute_results(
     np.fill_diagonal(full_pooled_demand, 0)
     full_demand = full_solo_demand + full_pooled_demand
     # np.save("full_demand.npy", full_demand)
-    # LTIFM per class ----------------------------------------------------
+    # LTIFM per class
     sol_np = LTIFM_reb_sparse(full_demand, road_graph, fcoeffs=fcoeffs, nash=nash, n=5)
 
     full_demand -= np.diag(np.diag(full_demand))

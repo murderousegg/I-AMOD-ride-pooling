@@ -388,7 +388,7 @@ class RidePoolingSimulationCore:
         reb_flow=0
         # compute time based modal shares in hours
         for u,v,d in self.tNet.G_supergraph.edges(data=True):
-            if "'" in d['type']:
+            if "p" in d['type']:
                 ped_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']
             elif "b" in d['type']:
                 bike_flow += self.tNet.G_supergraph[u][v]['flowNoRebalancing']*self.tNet.G_supergraph[u][v]['t_1']

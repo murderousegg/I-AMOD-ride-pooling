@@ -8,3 +8,7 @@ NYC_Uber_small/
 experiments/__pycache__/
 data/gml/
 results/*
+data/*
+
+*.npy
+*.gipckle
