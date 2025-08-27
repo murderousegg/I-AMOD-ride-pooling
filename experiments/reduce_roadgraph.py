@@ -151,7 +151,7 @@ def solve_kmedian(lat: Sequence[float], lon: Sequence[float], k_keep: int) -> Tu
     return np.array(centers), assignment, XY
 
 
-keep, mapping, XY = solve_kmedian(tNet_coords[:,0], tNet_coords[:,1], k_keep=100)
+keep, mapping, XY = solve_kmedian(tNet_coords[:,0], tNet_coords[:,1], k_keep=700)
 
 # create pruned roadgraph
 roadGraph = nx.DiGraph()

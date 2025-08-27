@@ -157,7 +157,7 @@ class sufficiencySimulation(RidePoolingSimulationCore):
 
         for idx, (u, v, d) in enumerate(self.tNet.G_supergraph.edges(data=True)):
             t_1 = self.tNet.G_supergraph[u][v]['t_1']
-            if "'" in d['type']:
+            if "p" in d['type']:
                 ped_flow += binned_x[idx, :] * t_1
             elif "b" in d['type']:
                 bike_flow += binned_x[idx, :] * t_1
@@ -169,7 +169,7 @@ class sufficiencySimulation(RidePoolingSimulationCore):
         modal_data = np.vstack([rp_flow, pt_flow, bike_flow, ped_flow]) * 1e-4
         # fig, ax = plt.subplots(figsize=(10, 5))
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5), gridspec_kw={'width_ratios': [5, 1]})
-        labels = ['ride-pooling', 'Public transportation', 'Biking', 'Walking']
+        labels = ['Ride-pooling', 'Public transportation', 'Biking', 'Walking']
         colors = plt.get_cmap("tab10").colors[:4]
         bottom = np.zeros_like(binned_times)
 

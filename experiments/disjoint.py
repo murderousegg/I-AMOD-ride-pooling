@@ -98,7 +98,7 @@ def main() -> None:
 
     # Path(cfg.results_dir).mkdir(parents=True, exist_ok=True)
     ###
-    cfg.max_iterations = 1
+    cfg.max_iterations = 15
     cfg.vehicle_limit = 15000
     cfg.mu_initial = 1e-2
     cfg.stable_needed = 3

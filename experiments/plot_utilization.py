@@ -263,7 +263,7 @@ def bar_plot_final_result(df1:pd.DataFrame, df2:pd.DataFrame, df3:pd.DataFrame, 
                            index=['df1', 'df1_2', 'df1_lim', 'df2', 'df2_2', 'df2_lim', 'df3', 'df3_2', 'df3_lim', 'df4', 'df4_2', 'df4_lim'])
 
     # #create fig
-    legend_labels = ['Ride-pooling Flow', 'Public Transport Flow', 'Bike Flow', 'Pedestrian Flow']
+    legend_labels = ['Ride-pooling', 'Public Transit', 'Biking', 'Walking']
 
     bar_width = 0.1
     group_spacing = 0.2
