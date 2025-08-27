@@ -257,8 +257,19 @@ def _build_objective_fair(tnet, snap: NetSnapshot, x, eps, params: SolverParams)
     '''
     Build objective function with fairness added.
     '''
+    ### for sustainability
+    modeSust = {
+        "b": 25,
+        "fb": 1,
+        "p": 50,
+        "pd": 1,
+        "s": 4,
+        "rp":1,
+        "frp":1,
+        "fs":1
+    }
     edge_times = np.array([
-        tnet.G_supergraph[u][v].get("t_0" if params.iteration == 0 else "t_1")
+        tnet.G_supergraph[u][v].get("t_0" if params.iteration == 0 else "t_1") / modeSust[tnet.G_supergraph[u][v]["type"]]
         for u, v in snap.edge_order
     ])
     base_obj = edge_times @ x.sum(axis=1)
