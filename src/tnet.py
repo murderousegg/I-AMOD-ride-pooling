@@ -570,7 +570,9 @@ def readNetFile(netFile, sep="\t"):
                        length=float(links[4]), t_0=float(links[5]), \
                        B=float(links[6]), power=float(links[7]), speedLimit=float(links[8]), \
                        toll=float(links[9]), type=float(links[10]))
-    G = nx.convert_node_labels_to_integers(G, first_label=1, ordering='sorted', label_attribute='node name')
+    for i in G.nodes():
+        G.nodes[i]['node name'] = i
+    # G = nx.convert_node_labels_to_integers(G, first_label=1, ordering='sorted', label_attribute='node name')
 
     return G
 
