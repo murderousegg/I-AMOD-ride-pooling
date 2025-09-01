@@ -250,6 +250,64 @@ def solve_flow_decomposition_D(G, origin, xo, g, L=1):
     m.update()
     return {d: {(i, j): m.getVarByName('x^' + str(d) + '_' + str(i) + '_' + str(j)).X for i, j in G.edges()} for d in D}
 
+@timeit
+def solve_flow_decomposition_D_tol(G, origin, xo, g, L=1, tol=1e-6):
+    m = Model()
+    m.setParam('OutputFlag', 0)
+    # Let Gurobi choose method automatically; if you must: m.setParam('Method', 1)
+    m.setParam('FeasibilityTol', tol)   # accept tiny violations up to ~tol
+    # m.setParam('OptimalityTol', 1e-6) # optional: keep reasonably strict optimality
+
+    # Define vars
+    D = [d for o, d in g.keys() if o == origin]
+    for i, j in G.edges():
+        for d in D:
+            m.addVar(lb=0, name=f'x^{d}_{i}_{j}')
+    m.update()
+
+    # Aggregate x over destinations
+    x = {}
+    for i, j in G.edges():
+        x[(i, j)] = quicksum(m.getVarByName(f'x^{d}_{i}_{j}') for d in D)
+
+    # Objective
+    obj = quicksum(L * G[i][j]['t_1'] * x[(i, j)] for i, j in G.edges())
+    m.setObjective(obj)
+
+    # "Soft" matching of aggregate flow to xo: |x - xo| ≤ tol
+    for i, j in G.edges():
+        m.addConstr(x[(i, j)] - xo[(i, j)] <= tol)
+        m.addConstr(x[(i, j)] - xo[(i, j)] >= -tol)
+
+    # Flow balance with tolerance band
+    for d in D:
+        for n in G.nodes():
+            inflow  = quicksum(m.getVarByName(f'x^{d}_{i}_{j}') for i, j in G.in_edges(nbunch=n))
+            outflow = quicksum(m.getVarByName(f'x^{d}_{j}_{k}') for j, k in G.out_edges(nbunch=n))
+
+            if origin != d:
+                if n == origin:
+                    expr = inflow - outflow + g[(origin, d)]
+                elif n == d:
+                    expr = inflow - g[(origin, d)] - outflow
+                else:
+                    expr = inflow - outflow
+            else:
+                expr = inflow - outflow
+
+            # enforce -tol ≤ expr ≤ tol
+            m.addConstr(expr <= tol)
+            m.addConstr(expr >= -tol)
+
+    m.optimize()
+
+    # Return flows per destination
+    return {
+        d: {(i, j): m.getVarByName(f'x^{d}_{i}_{j}').X for i, j in G.edges()}
+        for d in D
+    }
+
+
 def solve_flow_decomposition_D_fast_tol(G, origin, xo, g, cost_key='t_1',
                                         tol_edge=1e-12, link_tol_abs=1e-8, link_tol_rel=1e-9,
                                         node_tol_abs=1e-8):
@@ -325,7 +383,7 @@ def solve_flow_decomposition_D_fast(G, origin, xo, g, cost_key='t_1', tol=1e-12)
     H = G.edge_subgraph(Epos).copy()
     if origin not in H:  # no positive flow at all
         return {}
-
+    
     # Destinations with demand and present in H
     D = [d for (o,d),val in g.items() if o==origin and val>tol and d in H]
 
@@ -493,12 +551,12 @@ def rebRouteFinder(G, eps, print_=False):
 def userRouteFinder(G, g, s_flows, eps):
     routes_dic = {}
     for origin, x in s_flows.items():
-        xf = solve_flow_decomposition_D(G, origin, x, g, L=1)
+        xf = solve_flow_decomposition_D_tol(G, origin, x, g, L=1, tol=1e-6)
         xf = {(origin, d):v for d, v in xf.items()}
         for o,d in xf.keys():
             gw = [(o,d), sum([v for k,v in xf[(o,d)].items() if k[0]==o])]
             if gw[1] > eps:
-                routes = routeFinder_OD(G, gw, xf[(o,d)], eps=20, max_routes=20)
+                routes = routeFinder_OD(G, gw, xf[(o,d)], eps=1, max_routes=10)
                 routes_dic[(o,d)] = routes
     return routes_dic
 
