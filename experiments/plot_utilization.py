@@ -292,9 +292,9 @@ def bar_plot_final_result(df1:pd.DataFrame, df2:pd.DataFrame, df3:pd.DataFrame, 
     for i in range(4):
         x_center = group_centers[i]
         # ax.text(x_center, -0.09, [r'$\phi = 1$', r'$\phi = 2$', r'$\phi = 3$', r'$\phi = 4$'][i], ha='center', va='top', transform=ax.get_xaxis_transform(), fontsize=20)
-        ax.text(x_center, -0.09, [r'$\phi = 0.5$', r'$\phi = 1$', r'$\phi = 2$', r'$\phi = 3$'][i], ha='center', va='top', transform=ax.get_xaxis_transform(), fontsize=20)
+        ax.text(x_center, 1.09, [r'$\phi = 0.5$', r'$\phi = 1$', r'$\phi = 2$', r'$\phi = 3$'][i], ha='center', va='top', transform=ax.get_xaxis_transform(), fontsize=20)
     ax.set_ylabel(r'Time-Based Modal Share ($\times 10^4 \mathrm{h}$)')
-    ax.set_xlabel(r"$N_{\mathrm{cars,max}}$ ($\times 10^3$)", labelpad=30)
+    ax.set_xlabel(r"$N_{\mathrm{cars,max}}$ ($\times 10^3$)", labelpad=0)
     # ax.set_title(r"Modal Share Based on Demand and Vehcle Limit", fontsize=25)
     plt.legend(legend_labels ,loc='upper left', fontsize=16)
     # pooling percentages
