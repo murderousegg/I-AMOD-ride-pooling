@@ -12,3 +12,5 @@ data/*
 
 *.npy
 *.gipckle
+/data
+/data/gml
