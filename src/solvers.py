@@ -118,6 +118,14 @@ def _build_snapshot(tnet) -> NetSnapshot:
     # ensure row-sum zero (supply = –demand) per origin
     for o, i in origin_idx.items():
         demand[i, node_idx[o]] = -demand[i].sum()
+    ### flipped
+    # demand = np.zeros((len(node_order), len(origins)))
+    # for (o, d), q in tnet.g.items():
+    #     demand[node_idx[d], origin_idx[o]] += q
+    #     alpha_o[origin_idx[o]] += q
+    # # ensure row-sum zero (supply = –demand) per origin
+    # for o, i in origin_idx.items():
+    #     demand[node_idx[o], i] = -demand[node_idx[o]].sum()
     return NetSnapshot(Binc=Binc, edge_order=edge_order, node_order=node_order, origins=origins, demand_matrix=demand, alpha_o=alpha_o)
 
 @timeit
