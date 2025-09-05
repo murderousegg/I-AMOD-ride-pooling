@@ -1,4 +1,0 @@
-n: 10
-theta_n: 2
-linear: False
-g_multi: 3

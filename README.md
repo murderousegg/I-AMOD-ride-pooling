@@ -1,18 +1,22 @@
 # I-AMOD-ride-pooling
-This project proposes an approach to synthesize the works by [Paparella et al.](https://ieeexplore.ieee.org/document/10605118) on ride-pooling and [Wollenstein-Betech et al., 2021](https://ieeexplore.ieee.org/document/9541261) on Intermodal Autonomous Mobility on Demand (I-AMoD). Both approaches will be combined to form a model that optimizes traffic flow for NYC, with data taken from [source]. The paper for this project can be found here (add link when paper ready)
+This project proposes an approach to synthesize the works by [Paparella et al.](https://ieeexplore.ieee.org/document/10605118) on ride-pooling and [Wollenstein-Betech et al., 2021](https://ieeexplore.ieee.org/document/9541261) on Intermodal Autonomous Mobility on Demand (I-AMoD). The paper for this project can be found here (add link when paper ready)
 
-# File organisation and running the code
+# File organisation
 
-As of 20-12, the code is yet to be combined. The ride-pooling approach, which was originally written in MatLab, is included as Ride-pooling.py, and its uitlity functions are included in /Utilities/RidePooling/. The datasets stored in /NYC20/ and /NYC250/ are copied from the Paparalla, but the digraph data is modified beforehand using Utilities/convert_digraph.m, as python does not support the original matlab format for the digraph. To run this on one of the datasets, modify CITY_FOLDER at the top of Ride-pooling.py to the name of the folder that you want to run. If only parts of the algorithm need to be run, simply comment out the functions from main() at the bottom of the file. By default, the code analyses ride-pooling with a max of 2, 3 and 4 people.
+Data is split into 3 parts: network data in `data\net`, positional data for nodes in `data\pos` and trip (demand) data in `data\trips`. While there are toy datasets for NYC and some other cities, the main focus is on the full dataset NYC. 
+Preprocessing scripts, as well as the different scripts for optimizing the network can be found in `experiments\`. Here, `reduce_roadgraph.py` prunes nodes from the NYC dataset and stores the new roadgraph in `data\gml`. `create_save_NYC.py` then creates the supergraph for the NYC dataset, and stores it in `data\gml` as well. The final "preprocessing" step is performed in `create_rp_list_small.py`, which creates and stores the database of all possible ride-pooling combinations.
+During this last step, a new folder `NYC` is created that stores all the data for the ride-pooling combinations. Note that `create_rp_list_small.py` can be run in parts, as some of the steps are saved. 
+The `src\` folder contains some helper libraries. `src\tnet.py` contains the backbone of the supergraph functionality, `src\solvers.py` contains the I-AMoD solvers, and `src\LTIFM_reb.py` is the ride-pooling solver for the vehicle routing part. `src\simConfig.py` contains a configuration class that contains some tunable hyperparameters, and `src\simulationCore.py` contains the core class for the bi-level problem. 
 
-## Intermodal Mobility on Demand
-The code from [Wollenstein-betech et al., 2021] is currently copied into /intermodal/. To run an expirement, a command needs to be entered into the console:
-`python3 -m experiments.{name of the file without extension}`
-Note that there are many different types of experiments listed in the expiriments folder. In the future, only the necessary parts of the code will be reused. Additionally, all of data used in that paper are in a different structure than the data from [Paparella et al.]. To solve this issue, the code still needs to be modified to some extend in order to accept the new formatting. 
+# Running the scripts
 
-Requirements: gurobipy, networkx, scipy, numpy, pwlf, joblib, h5py
+Before running the expirements, make sure requirements are installed from the `requirements.txt` file:
 
-# Main functionality
-The main expiriment can be run by using
-`python3 -m experiments.ride-pooling`
-First, a network is definied similar to the networks described by [Wollenstein-betech et al., 2021]. Along with the normal modes of transport (walking, public transport, cars), a ride-pooling layer is created. Then, all spatially feasible bags/sequences using the algorithm proposed by [Paparella et al., 2024] are computed for the ride-pooling layer. Each sequence corresponds to a selection variable in the optimization problem, and a demand matrix can be created as a linear combination of all sequences (that are selected). 
+`pip install -r requirements.txt`
+
+Next, any of the experiments can be run using 
+
+`python -m experimentst.[expirement_name]`
+
+or `python3` depending on the installation. Since the new york dataset is quite large, it is recommended to offload the work onto a server, or at least use a computer with a decent amount of ram. (You can run the NYC dataset on a laptop, however only when the roadgraph is pruned to a low amount of nodes.)
+

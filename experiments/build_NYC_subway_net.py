@@ -1,11 +1,10 @@
 import src.tnet as tnet
-import src.CARS as cars
 import os
 from datetime import datetime
 
 
 def build_NYC_net(dir, only_road=False, symbls=False):
-    gFile = "data/trips/NYC_trips.txt"
+    gFile = "data/trips/NYC_M_trips.txt"
     fcoeffs = [1, 0, 0, 0, 0.15, 0]
     for filename in os.listdir(dir):
         if filename.endswith('Road_net.txt'):

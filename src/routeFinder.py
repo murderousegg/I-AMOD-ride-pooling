@@ -10,50 +10,65 @@ def k_shortest_paths(G, source, target, k, weight=None):
 
 
 def solve_flow_finder(G, gw, R, xw):
-    # Start model
-    m = Model('QP')
-    m.setParam('OutputFlag',0)
-    m.setParam('BarHomogeneous', 1)
-    m.update()
+    """
+    G : DiGraph
+    gw: [(o,d), demand]  (same as your caller)
+    R : list of routes, each route is a list of nodes [o,...,d]
+    xw: dict {(i,j): flow}   per-OD link flows (can be sparse / subset of G.edges)
+    """
+    demand = gw[1]
 
-    links = list(G.edges())
+    # --- 1) Build the unified edge set E = support(xw) ∪ edges used by routes
+    def route_edges(r):
+        return [(r[i], r[i+1]) for i in range(len(r)-1)]
+
+    E = set(xw.keys())
+    for r in R:
+        E.update(route_edges(r))
+    links = list(E)                         # fixed ordering
+    idx   = {e:i for i,e in enumerate(links)}
     nLinks = len(links)
     nRoutes = len(R)
-    gw = gw[1]
 
-    xw = [x for k,x in xw.items()]
+    # Target vector aligned with 'links'
+    xw_vec = np.zeros(nLinks, dtype=float)
+    for e, v in xw.items():
+        xw_vec[idx[e]] = float(v)
 
-    # Define variables
-    p = [m.addVar(lb=0, ub=1, name='p'+str(i)) for i in range(nRoutes)]
-    #x = [m.addVar(lb=0, ub=1, name='x_' + str(i) + '_'+str(j)) for (i,j) in G.edges()]
+    # --- 2) Build sparse incidence info: for each edge, which routes use it
+    # inc[e] = list of route indices that contain edge e
+    inc = {e: [] for e in links}
+    for r_id, r in enumerate(R):
+        for e in route_edges(r):
+            if e in inc:                    # only edges in 'links'
+                inc[e].append(r_id)
+
+    # --- 3) QP: min  Σ_e ( xw_e - demand * Σ_{r∋e} p_r )^2  s.t. Σ p = 1, p>=0
+    m = Model('QP')
+    m.setParam('OutputFlag', 0)
+    m.setParam('BarHomogeneous', 1)
+
+    p = [m.addVar(lb=0.0, ub=1.0, name=f"p{r}") for r in range(nRoutes)]
     m.update()
 
-    # Build route-link incidence Matrix
-    A = [[0 for i in range(nRoutes)] for j in range(nLinks)]
-    ri = 0
-    for r in R:
-        for i in range(len(r)-1):
-            l = links.index((r[i], r[i+1]))
-            A[l][ri] = 1
-        ri += 1
+    # xhat_e = demand * Σ_{r in inc[e]} p_r
+    # Objective = Σ_e (xw_vec[i] - xhat_e)^2
+    obj_terms = []
+    for i, e in enumerate(links):
+        if inc[e]:
+            xhat_e = demand * quicksum(p[r] for r in inc[e])
+        else:
+            xhat_e = 0.0
+        diff = xw_vec[i] - xhat_e
+        obj_terms.append(diff * diff)
 
-    A = np.array(A)
-
-    # Set Objective
-    x = []
-    for l in range(nLinks):
-        x.append(sum([A[l][r] * p[r] * gw for r in range(nRoutes)]))
-
-    obj = sum([(xw[i]-x[i])*(xw[i]-x[i]) for i in range(len(x))])
-    m.update()
-    m.setObjective(obj, GRB.MINIMIZE)
-
-    # Set Constaints
-    m.addConstr(sum(p) == 1)
-    m.update()
+    m.setObjective(quicksum(obj_terms), GRB.MINIMIZE)
+    m.addConstr(quicksum(p) == 1.0)
     m.optimize()
-    sol = get_sol(m, R)
-    return sol, obj.getValue()
+
+    # Extract non-negligible routes
+    sol = {i: {'p': p[i].X, 'r': R[i]} for i in range(nRoutes) if p[i].X > 1e-12}
+    return sol, m.objVal
 
 
 def get_sol(m, R):
@@ -75,7 +90,7 @@ def routeFinder_OD(G, gw, od_flows_w, eps, max_routes=100):
     err = 999999
     while (err >= eps) and (k<max_routes):
         k += 1
-        R = k_shortest_paths(G, source=i, target=j, k=k, weight='t_k')
+        R = k_shortest_paths(G, source=i, target=j, k=k, weight='t_1')
         sol, obj = solve_flow_finder(G, gw, R, od_flows_w)
         err = obj
         #print(str(k) + ' : ' + str(err))
@@ -134,7 +149,7 @@ def solve_rebalancing_O(G, O):
     for i,j in G.edges():
         x[(i,j)] = quicksum([m.getVarByName('x^'+str(o)+'_'+str(i)+'_'+str(j)) for o in O])
     # Add Obj
-    obj = quicksum(G[i][j]['t_k']*x[(i,j)] for i,j in G.edges())
+    obj = quicksum(G[i][j]['t_1']*x[(i,j)] for i,j in G.edges())
     m.setObjective(obj)
     m.update()
     # Add constraints
@@ -166,7 +181,7 @@ def solve_rebalancing_D(G, origin, D, xo, potential):
         x[(i,j)] = quicksum([m.getVarByName('x^'+str(d)+'_'+str(i)+'_'+str(j)) for d in D])
     m.update()
     # Add Obj
-    obj = quicksum(G[i][j]['t_k']*x[(i,j)] for i,j in G.edges())
+    obj = quicksum(G[i][j]['t_1']*x[(i,j)] for i,j in G.edges())
     m.setObjective(obj)
     m.update()
     # Add constraints
@@ -206,7 +221,7 @@ def solve_flow_decomposition_D(G, origin, xo, g, L=1):
         x[(i,j)] = quicksum([m.getVarByName('x^'+str(d)+'_'+str(i)+'_'+str(j)) for d in D])
     m.update()
     # Add Obj
-    obj = quicksum(L*G[i][j]['t_k']*x[(i,j)] for i,j in G.edges())
+    obj = quicksum(L*G[i][j]['t_1']*x[(i,j)] for i,j in G.edges())
     m.setObjective(obj)
     m.update()
     # Add constraints
@@ -235,6 +250,217 @@ def solve_flow_decomposition_D(G, origin, xo, g, L=1):
     m.update()
     return {d: {(i, j): m.getVarByName('x^' + str(d) + '_' + str(i) + '_' + str(j)).X for i, j in G.edges()} for d in D}
 
+@timeit
+def solve_flow_decomposition_D_tol(G, origin, xo, g, L=1, tol=1e-6):
+    m = Model()
+    m.setParam('OutputFlag', 0)
+    # Let Gurobi choose method automatically; if you must: m.setParam('Method', 1)
+    m.setParam('FeasibilityTol', tol)   # accept tiny violations up to ~tol
+    # m.setParam('OptimalityTol', 1e-6) # optional: keep reasonably strict optimality
+
+    # Define vars
+    D = [d for o, d in g.keys() if o == origin]
+    for i, j in G.edges():
+        for d in D:
+            m.addVar(lb=0, name=f'x^{d}_{i}_{j}')
+    m.update()
+
+    # Aggregate x over destinations
+    x = {}
+    for i, j in G.edges():
+        x[(i, j)] = quicksum(m.getVarByName(f'x^{d}_{i}_{j}') for d in D)
+
+    # Objective
+    obj = quicksum(L * G[i][j]['t_1'] * x[(i, j)] for i, j in G.edges())
+    m.setObjective(obj)
+
+    # "Soft" matching of aggregate flow to xo: |x - xo| ≤ tol
+    for i, j in G.edges():
+        m.addConstr(x[(i, j)] - xo[(i, j)] <= tol)
+        m.addConstr(x[(i, j)] - xo[(i, j)] >= -tol)
+
+    # Flow balance with tolerance band
+    for d in D:
+        for n in G.nodes():
+            inflow  = quicksum(m.getVarByName(f'x^{d}_{i}_{j}') for i, j in G.in_edges(nbunch=n))
+            outflow = quicksum(m.getVarByName(f'x^{d}_{j}_{k}') for j, k in G.out_edges(nbunch=n))
+
+            if origin != d:
+                if n == origin:
+                    expr = inflow - outflow + g[(origin, d)]
+                elif n == d:
+                    expr = inflow - g[(origin, d)] - outflow
+                else:
+                    expr = inflow - outflow
+            else:
+                expr = inflow - outflow
+
+            # enforce -tol ≤ expr ≤ tol
+            m.addConstr(expr <= tol)
+            m.addConstr(expr >= -tol)
+
+    m.optimize()
+
+    # Return flows per destination
+    return {
+        d: {(i, j): m.getVarByName(f'x^{d}_{i}_{j}').X for i, j in G.edges()}
+        for d in D
+    }
+
+
+def solve_flow_decomposition_D_fast_tol(G, origin, xo, g, cost_key='t_1',
+                                        tol_edge=1e-12, link_tol_abs=1e-8, link_tol_rel=1e-9,
+                                        node_tol_abs=1e-8):
+    # 1) Work on positive-flow subgraph
+    Epos = [(i,j) for (i,j),v in xo.items() if v > tol_edge]
+    H = G.edge_subgraph(Epos).copy()
+    if origin not in H:
+        return {}
+
+    D = [d for (o,d),val in g.items() if o==origin and val>node_tol_abs and d in H]
+    fwd = set(nx.descendants(H, origin)) | {origin}
+    Hr = H.reverse(copy=False)
+    back = {d: (set(nx.descendants(Hr, d)) | {d}) for d in D}
+    D = [d for d in D if d in fwd]
+
+    Ed = {d: [(i,j) for (i,j) in H.edges() if (i in fwd) and (j in back[d])] for d in D}
+    if not any(Ed[d] for d in D):
+        return {d: {e:0.0 for e in H.edges()} for d in D}
+
+    m = Model()
+    m.Params.OutputFlag = 0
+    m.Params.Presolve   = 2
+    m.Params.Method     = 1   # dual simplex
+
+    # 2) Variables only where usable
+    x = {}
+    for d in D:
+        for (i,j) in Ed[d]:
+            x[(d,i,j)] = m.addVar(lb=0.0, name=f"x[{d},{i},{j}]")
+    m.update()
+
+    # 3) Soft linking:  sum_d x_d(e) ≈ xo_e  within ±tau_e
+    for (i,j) in H.edges():
+        terms = [x[(d,i,j)] for d in D if (d,i,j) in x]
+        tau_e = max(link_tol_abs, link_tol_rel*max(1.0, xo[(i,j)]))
+        if terms:
+            m.addConstr(quicksum(terms) >= max(0.0, xo[(i,j)] - tau_e))
+            m.addConstr(quicksum(terms) <= xo[(i,j)] + tau_e)
+        else:
+            # if no destination can use this edge, its xo must be tiny
+            m.addConstr(0.0 <= xo[(i,j)] + tau_e)
+            m.addConstr(0.0 >= max(0.0, xo[(i,j)] - tau_e))
+
+    # 4) Node balance per destination with small tolerance
+    for d in D:
+        dem = g[(origin,d)]
+        nodes_d = (fwd & back[d])
+        for n in nodes_d:
+            infl  = quicksum(x[(d,i,n)] for (i,_) in H.in_edges(n)  if (d,i,n) in x)
+            outfl = quicksum(x[(d,n,j)] for (_,j) in H.out_edges(n) if (d,n,j) in x)
+            if n == origin and origin != d:
+                m.addConstr(infl - outfl + dem >= -node_tol_abs)
+                m.addConstr(infl - outfl + dem <=  node_tol_abs)
+            elif n == d:
+                m.addConstr(infl - outfl - dem >= -node_tol_abs)
+                m.addConstr(infl - outfl - dem <=  node_tol_abs)
+            else:
+                m.addConstr(infl - outfl >= -node_tol_abs)
+                m.addConstr(infl - outfl <=  node_tol_abs)
+
+    # 5) Tie-break objective (travel time)
+    m.setObjective(quicksum(G[i][j][cost_key] * x[(d,i,j)]
+                            for d in D for (i,j) in Ed[d] if (d,i,j) in x), GRB.MINIMIZE)
+    m.optimize()
+
+    return {d: {e: (x[(d,e[0],e[1])].X if (d,e[0],e[1]) in x else 0.0) for e in H.edges()} for d in D}
+
+
+@timeit
+def solve_flow_decomposition_D_fast(G, origin, xo, g, cost_key='t_1', tol=1e-12):
+    # Subgraph of edges with positive bundled flow from this origin
+    Epos = [(i,j) for (i,j),v in xo.items() if v > tol]
+    H = G.edge_subgraph(Epos).copy()
+    if origin not in H:  # no positive flow at all
+        return {}
+    
+    # Destinations with demand and present in H
+    D = [d for (o,d),val in g.items() if o==origin and val>tol and d in H]
+
+    # Forward reachability from origin within H
+    fwd = set(nx.descendants(H, origin)) | {origin}
+    # Reverse graph once (for back-reachability to each destination)
+    Hr = H.reverse(copy=False)
+
+    # Precompute back-reachable sets per destination
+    back = {d: (set(nx.descendants(Hr, d)) | {d}) for d in D}
+
+    # Keep only destinations actually reachable in H
+    D = [d for d in D if d in fwd]
+
+    # Candidate edges per destination (edge usable if tail ∈ fwd and head ∈ back[d])
+    Ed = {
+        d: [(i,j) for (i,j) in H.edges()
+            if (i in fwd) and (j in back[d])]
+        for d in D
+    }
+
+    # If nothing to decompose, return empties
+    if not any(Ed[d] for d in D):
+        return {d: {e:0.0 for e in H.edges()} for d in D}
+
+    m = Model()
+    m.Params.OutputFlag = 0
+    m.Params.Presolve = 2
+    m.Params.Method   = 1  # dual simplex is usually faster here
+
+    # Variables: only where an edge can plausibly be on some o→d path
+    x = {}
+    for d in D:
+        for (i,j) in Ed[d]:
+            x[(d,i,j)] = m.addVar(lb=0.0, name=f"x[{d},{i},{j}]")
+    m.update()
+
+    # Linking constraints: sum_d x_d(e) == xo_e  for each edge e in support
+    # Only sum over d where we actually created a var for that edge
+    for (i,j) in H.edges():
+        terms = []
+        for d in D:
+            if (d,i,j) in x:
+                terms.append(x[(d,i,j)])
+        if terms:
+            m.addConstr(quicksum(terms) == xo[(i,j)])
+        else:
+            # No destination can use this edge → its xo must be ~0
+            # If xo>tol here, the original data is inconsistent; to be safe:
+            m.addConstr(0.0 == xo[(i,j)])
+
+    # Flow conservation per destination, restricted to nodes that can lie on o→d paths
+    for d in D:
+        nodes_d = (fwd & back[d])  # only these can appear on a valid o→d path
+        dem = g[(origin,d)]
+        for n in nodes_d:
+            infl  = quicksum(x[(d,i,n)] for (i,_) in H.in_edges(n)  if (d,i,n) in x)
+            outfl = quicksum(x[(d,n,j)] for (_,j) in H.out_edges(n) if (d,n,j) in x)
+            if n == origin and origin != d:
+                m.addConstr(infl - outfl + dem == 0)
+            elif n == d:
+                m.addConstr(infl - outfl - dem == 0)
+            else:
+                m.addConstr(infl - outfl == 0)
+
+    # Objective: any feasible split is fine; use a tiny cost to help tie-break
+    m.setObjective(quicksum(G[i][j][cost_key] * x[(d,i,j)]
+                            for d in D for (i,j) in Ed[d] if (d,i,j) in x), GRB.MINIMIZE)
+
+    m.optimize()
+
+    # Extract solution (zero if var not created)
+    sol = {d: {e: 0.0 for e in H.edges()} for d in D}
+    for d in D:
+        for (i,j) in Ed[d]:
+            sol[d][(i,j)] = x[(d,i,j)].X if (d,i,j) in x else 0.0
+    return sol
 
 
 @timeit
@@ -250,7 +476,7 @@ def solve_decomposition_dest(G, D, xo, potential, origin, eps=0.001):
         x[(i,j)] = quicksum([m.getVarByName('x^'+str(d)+'_'+str(i)+'_'+str(j)) for d in D])
     m.update()
     # Add Obj
-    obj = quicksum(G[i][j]['t_k']*x[(i,j)] for i,j in G.edges())
+    obj = quicksum(G[i][j]['t_1']*x[(i,j)] for i,j in G.edges())
     m.setObjective(obj)
     m.update()
     # Add constraints
@@ -325,12 +551,12 @@ def rebRouteFinder(G, eps, print_=False):
 def userRouteFinder(G, g, s_flows, eps):
     routes_dic = {}
     for origin, x in s_flows.items():
-        xf = solve_flow_decomposition_D(G, origin, x, g, L=1)
+        xf = solve_flow_decomposition_D_tol(G, origin, x, g, L=1, tol=1e-6)
         xf = {(origin, d):v for d, v in xf.items()}
         for o,d in xf.keys():
             gw = [(o,d), sum([v for k,v in xf[(o,d)].items() if k[0]==o])]
             if gw[1] > eps:
-                routes = routeFinder_OD(G, gw, xf[(o,d)], eps=20, max_routes=20)
+                routes = routeFinder_OD(G, gw, xf[(o,d)], eps=1, max_routes=10)
                 routes_dic[(o,d)] = routes
     return routes_dic
 
@@ -347,4 +573,4 @@ def RouteFinder(G, g, s_flows, eps, od):
     return routes
 
 def RouteTravelTime(G,path):
-    return sum([G[path[i]][path[i+1]]['t_k'] for i in range(len(path)-1)])
+    return sum([G[path[i]][path[i+1]]['t_1'] for i in range(len(path)-1)])
